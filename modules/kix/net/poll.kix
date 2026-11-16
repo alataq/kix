@@ -1,0 +1,87 @@
+import kix.string;
+import kix.vector;
+import kix.util.bytes;
+import kix.syscalls;
+import kix.error.exceptions;
+
+namespace net.poll {
+    public class Event {
+        public fd: int;
+        public events: int;
+
+        public Event(fd: int, events: int) {
+            self.fd = fd;
+            self.events = events;
+        }
+    }
+
+    public class Poller {
+        private fd: int;
+
+        public Poller() throws Exception {
+            self.fd = syscalls::epollCreate1(0);
+            if (self.fd < 0) {
+                throw new Exception(ExceptionKind.Io, self.fd, "epoll_create1 failed");
+            }
+        }
+
+        private eventBytes(fd: int, events: int): String {
+            Bytes buffer = new Bytes();
+            int i = 0;
+            while (i < 12) { buffer.appendByte(0); i = i + 1; }
+            buffer.writeU32LE(0, events);
+            buffer.writeU64LE(4, fd);
+            return buffer.raw();
+        }
+
+        public add(fd: int, events: int): void throws Exception {
+            int result = syscalls::epollCtl(self.fd, 1, fd, self.eventBytes(fd, events));
+            if (result != 0) {
+                throw new Exception(ExceptionKind.Io, result, "epoll_ctl add failed");
+            }
+        }
+
+        public modify(fd: int, events: int): void throws Exception {
+            int result = syscalls::epollCtl(self.fd, 3, fd, self.eventBytes(fd, events));
+            if (result != 0) {
+                throw new Exception(ExceptionKind.Io, result, "epoll_ctl modify failed");
+            }
+        }
+
+        public remove(fd: int): void throws Exception {
+            int result = syscalls::epollCtl(self.fd, 2, fd, new String());
+            if (result != 0) {
+                throw new Exception(ExceptionKind.Io, result, "epoll_ctl remove failed");
+            }
+        }
+
+        public wait(maxEvents: int, timeoutMillis: int): Vector<Event> throws Exception {
+            Bytes buffer = new Bytes();
+            int i = 0;
+            while (i < maxEvents * 12) { buffer.appendByte(0); i = i + 1; }
+            int count = syscalls::epollWait(self.fd, buffer.raw(), maxEvents, timeoutMillis);
+            if (count < 0) {
+                throw new Exception(ExceptionKind.Io, count, "epoll_wait failed");
+            }
+            Vector<Event> result = new Vector<Event>();
+            i = 0;
+            while (i < count) {
+                int offset = i * 12;
+                result.push(new Event(buffer.readU64LE(offset + 4), buffer.readU32LE(offset)));
+                i = i + 1;
+            }
+            return result;
+        }
+
+        public close(): void {
+            if (self.fd >= 0) {
+                syscalls::close(self.fd);
+                self.fd = -1;
+            }
+        }
+
+        public ~Poller() {
+            self.close();
+        }
+    }
+}

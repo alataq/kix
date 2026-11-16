@@ -1,0 +1,35 @@
+import kix.io;
+import kix.error.exceptions;
+import kix.string;
+import kix.fs;
+import kix.vector;
+
+public main(): int throws Exception {
+    String root = "/tmp/kix-fs-example";
+    String notes = root.concat("/docs/notes");
+    String readme = notes.concat("/readme.txt");
+
+    fs::removeAll(root);
+    fs::mkdirAll(notes, 511);
+
+    fs::writeFile(readme, "Kix fs example\n");
+    fs::appendFile(readme, "directories, files, and metadata\n");
+    io::printf("readme:\n%s", fs::readFile(readme));
+
+    Vector<String> names = fs::list(notes);
+    io::printf("entries: %lld\n", names.length());
+
+    Stat info = fs::stat(readme);
+    io::printf("size: %lld file: %lld\n", info.size(), info.isFile() ? 1 : 0);
+
+    String copied = root.concat("/copy.txt");
+    fs::copyFile(readme, copied);
+
+    String link = root.concat("/link.txt");
+    fs::createSymlink(copied, link);
+    io::printf("link: %s\n", fs::readSymlink(link));
+
+    fs::removeAll(root);
+    io::println("cleaned up");
+    return 0;
+}

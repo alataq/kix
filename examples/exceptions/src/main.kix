@@ -1,0 +1,45 @@
+import kix.io;
+import kix.string;
+import kix.error.exceptions;
+
+class Resource {
+    public id: int;
+
+    public Resource(id: int) {
+        self.id = id;
+    }
+
+    public ~Resource() {
+        io::printf("release %lld\n", self.id);
+    }
+}
+
+public parse(value: int): int throws Exception{
+    if (value < 0) {
+        throw new Exception(ExceptionKind.InvalidArgument, -22, "negative input");
+    }
+    return value * 2;
+}
+
+public main(): int {
+    Resource resource = new Resource(7);
+    defer delete resource;
+
+    try {
+        io::printf("parsed=%lld\n", parse(21));
+    } catch (error: Exception) {
+        io::println(error.message());
+    } finally {
+        io::println("finally");
+    }
+
+    try {
+        parse(-1);
+    } catch (error: Exception) {
+        io::printf("caught: %s\n", error.message());
+    } finally {
+        io::println("finally again");
+    }
+
+    return 0;
+}

@@ -1,0 +1,101 @@
+import kix.string;
+import kix.util.bytes;
+import kix.syscalls;
+import kix.net;
+import kix.error.exceptions;
+import kix.util.text;
+
+namespace net.udp {
+    public class Datagram {
+        public data: String;
+        public address: net::Address;
+
+        public Datagram(data: String, address: net::Address) {
+            self.data = data;
+            self.address = address;
+        }
+    }
+
+    public class Socket {
+        private fd: int;
+        private closed: bool;
+
+        public Socket() {
+            self.fd = -1;
+            self.closed = true;
+        }
+
+        public descriptor(): int { return self.fd; }
+
+        public bind(host: String, port: int): void throws Exception {
+            net::Address address = new net::Address(host, port);
+            self.fd = syscalls::socket(2, 2, 0);
+            if (self.fd < 0) {
+                throw new Exception(ExceptionKind.Io, self.fd, "socket failed");
+            }
+            int result = syscalls::bind(self.fd, address.sockaddr(), 16);
+            if (result != 0) {
+                syscalls::close(self.fd);
+                self.fd = -1;
+                throw new Exception(ExceptionKind.Io, result, "bind failed");
+            }
+            self.closed = false;
+        }
+
+        public send(data: String, host: String, port: int): void throws Exception {
+            if (self.closed) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "socket is closed");
+            }
+            net::Address address = new net::Address(host, port);
+            int result = syscalls::sendto(self.fd, data, data.length(), 0, address.sockaddr(), 16);
+            if (result < 0) {
+                throw new Exception(ExceptionKind.Io, result, "sendto failed");
+            }
+        }
+
+        public receive(count: int): Datagram throws Exception {
+            if (self.closed) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "socket is closed");
+            }
+            String buffer = new String();
+            buffer.reserve(count + 1);
+            String address = new String();
+            address.reserve(16);
+            String length = new String();
+            int i = 0;
+            while (i < 4) { length.appendByte(0 as char); i = i + 1; }
+            length.setByte(0, 16 as char);
+            int result = syscalls::recvfrom(self.fd, buffer, count, 0, address, length);
+            if (result < 0) {
+                throw new Exception(ExceptionKind.Io, result, "recvfrom failed");
+            }
+            String data = new String();
+            i = 0;
+            while (i < result) {
+                data.appendByte(buffer.byteAt(i));
+                i = i + 1;
+            }
+            Bytes raw = new Bytes(address);
+            int port = raw.readU16BE(2);
+            String host = new String();
+            int j = 4;
+            while (j < 8) {
+                if (j > 4) host.append(".");
+                host.append(text::intToString(raw.byteAt(j)));
+                j = j + 1;
+            }
+            return new Datagram(data, new net::Address(host, port));
+        }
+
+        public close(): void {
+            if (!self.closed) {
+                syscalls::close(self.fd);
+                self.closed = true;
+            }
+        }
+
+        public ~Socket() {
+            self.close();
+        }
+    }
+}

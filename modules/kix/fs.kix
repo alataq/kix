@@ -1,0 +1,1054 @@
+import kix.string;
+import kix.vector;
+import kix.syscalls;
+import kix.error.exceptions;
+
+namespace fs {
+    private DIR_BUFFER_SIZE(): int {
+        return 4096;
+    }
+
+    private kindFor(code: int): ExceptionKind {
+        if (code == -2) return ExceptionKind.NotFound;
+        if (code == -13) return ExceptionKind.PermissionDenied;
+        if (code == -17) return ExceptionKind.AlreadyExists;
+        if (code == -20) return ExceptionKind.NotDirectory;
+        if (code == -21) return ExceptionKind.IsDirectory;
+        if (code == -22) return ExceptionKind.InvalidArgument;
+        if (code == -5) return ExceptionKind.Io;
+        return ExceptionKind.Other;
+    }
+
+    private fail(code: int): void throws Exception {
+        throw new Exception(kindFor(code), code, errorText(code));
+    }
+
+    private byteValue(value: char): int {
+        int result = value;
+        if (result < 0) {
+            result = result + 256;
+        }
+        return result;
+    }
+
+    private readU16(buffer: String, offset: int): int {
+        return byteValue(buffer.byteAt(offset)) + byteValue(buffer.byteAt(offset + 1)) * 256;
+    }
+
+    private readU32(buffer: String, offset: int): int {
+        int result = byteValue(buffer.byteAt(offset));
+        result = result + byteValue(buffer.byteAt(offset + 1)) * 256;
+        result = result + byteValue(buffer.byteAt(offset + 2)) * 65536;
+        result = result + byteValue(buffer.byteAt(offset + 3)) * 16777216;
+        return result;
+    }
+
+    private readU64(buffer: String, offset: int): int {
+        int low = readU32(buffer, offset);
+        int high = readU32(buffer, offset + 4);
+        return low + high * 4294967296;
+    }
+
+    private readName(buffer: String, offset: int): String {
+        String name = new String();
+        int i = offset;
+        while (true) {
+            if (byteValue(buffer.byteAt(i)) == 0) {
+                break;
+            }
+            name.appendByte(buffer.byteAt(i));
+            i = i + 1;
+        }
+        return name;
+    }
+
+    public enum FileKind {
+        Unknown,
+        Fifo,
+        Character,
+        Directory,
+        Block,
+        File,
+        Symlink,
+        Socket,
+    }
+
+    public errorText(code: int): String {
+        if (code == 0) {
+            return "ok";
+        }
+        if (code == -1) {
+            return "operation not permitted";
+        }
+        if (code == -2) {
+            return "no such file or directory";
+        }
+        if (code == -5) {
+            return "input/output error";
+        }
+        if (code == -9) {
+            return "bad file descriptor";
+        }
+        if (code == -13) {
+            return "permission denied";
+        }
+        if (code == -16) {
+            return "device or resource busy";
+        }
+        if (code == -17) {
+            return "file exists";
+        }
+        if (code == -20) {
+            return "not a directory";
+        }
+        if (code == -21) {
+            return "is a directory";
+        }
+        if (code == -22) {
+            return "invalid argument";
+        }
+        if (code == -23) {
+            return "too many open files";
+        }
+        if (code == -28) {
+            return "no space left on device";
+        }
+        if (code == -30) {
+            return "read-only file system";
+        }
+        if (code == -36) {
+            return "file name too long";
+        }
+        if (code == -39) {
+            return "directory not empty";
+        }
+        return "unknown error";
+    }
+
+    public class Stat {
+        private errorCode: int;
+        private modeValue: int;
+        private uidValue: int;
+        private gidValue: int;
+        private linkCount: int;
+        private inode: int;
+        private sizeValue: int;
+        private modifiedSeconds: int;
+        private modifiedNanos: int;
+
+        public Stat() {
+            self.errorCode = 0;
+            self.modeValue = 0;
+            self.uidValue = 0;
+            self.gidValue = 0;
+            self.linkCount = 0;
+            self.inode = 0;
+            self.sizeValue = 0;
+            self.modifiedSeconds = 0;
+            self.modifiedNanos = 0;
+        }
+
+        public Stat(path: String) {
+            self.load(path, 0);
+        }
+
+        public Stat(path: String, flags: int) {
+            self.load(path, flags);
+        }
+
+        private load(path: String, flags: int): void {
+            String buffer = new String();
+            buffer.reserve(256);
+            int result = syscalls::statx(-100, path, flags, 2047, buffer);
+            self.errorCode = result;
+            if (result != 0) {
+                self.modeValue = 0;
+                self.uidValue = 0;
+                self.gidValue = 0;
+                self.linkCount = 0;
+                self.inode = 0;
+                self.sizeValue = 0;
+                self.modifiedSeconds = 0;
+                self.modifiedNanos = 0;
+                return;
+            }
+
+            self.linkCount = readU32(buffer, 16);
+            self.uidValue = readU32(buffer, 20);
+            self.gidValue = readU32(buffer, 24);
+            self.modeValue = readU16(buffer, 28);
+            self.inode = readU64(buffer, 32);
+            self.sizeValue = readU64(buffer, 40);
+            self.modifiedSeconds = readU64(buffer, 112);
+            self.modifiedNanos = readU32(buffer, 120);
+        }
+
+        public error(): int {
+            return self.errorCode;
+        }
+
+        public errorText(): String {
+            return errorText(self.errorCode);
+        }
+
+        public kind(): FileKind {
+            int value = self.modeValue / 4096;
+            if (value == 1) {
+                return FileKind.Fifo;
+            }
+            if (value == 2) {
+                return FileKind.Character;
+            }
+            if (value == 4) {
+                return FileKind.Directory;
+            }
+            if (value == 6) {
+                return FileKind.Block;
+            }
+            if (value == 8) {
+                return FileKind.File;
+            }
+            if (value == 10) {
+                return FileKind.Symlink;
+            }
+            if (value == 12) {
+                return FileKind.Socket;
+            }
+            return FileKind.Unknown;
+        }
+
+        public isFile(): bool {
+            return self.kind() == FileKind.File;
+        }
+
+        public isDirectory(): bool {
+            return self.kind() == FileKind.Directory;
+        }
+
+        public isSymlink(): bool {
+            return self.kind() == FileKind.Symlink;
+        }
+
+        public isFifo(): bool {
+            return self.kind() == FileKind.Fifo;
+        }
+
+        public isSocket(): bool {
+            return self.kind() == FileKind.Socket;
+        }
+
+        public isBlockDevice(): bool {
+            return self.kind() == FileKind.Block;
+        }
+
+        public isCharacterDevice(): bool {
+            return self.kind() == FileKind.Character;
+        }
+
+        public permissions(): int {
+            return self.modeValue % 4096;
+        }
+
+        public size(): int {
+            return self.sizeValue;
+        }
+
+        public uid(): int {
+            return self.uidValue;
+        }
+
+        public gid(): int {
+            return self.gidValue;
+        }
+
+        public links(): int {
+            return self.linkCount;
+        }
+
+        public ino(): int {
+            return self.inode;
+        }
+
+        public modified(): int {
+            return self.modifiedSeconds;
+        }
+
+        public modifiedNsec(): int {
+            return self.modifiedNanos;
+        }
+    }
+
+    public class File {
+        private handle: int;
+        private opened: bool;
+        private errorCode: int;
+        private pathValue: String;
+
+        public File() {
+            self.handle = -1;
+            self.opened = false;
+            self.errorCode = 0;
+            self.pathValue = new String();
+        }
+
+        public File(path: String, mode: String) {
+            self.handle = -1;
+            self.opened = false;
+            self.errorCode = 0;
+            self.pathValue = new String();
+            self.open(path, mode);
+        }
+
+        public open(path: String, mode: String): bool {
+            if (self.opened) {
+                self.close();
+            }
+
+            int flags = 0;
+            int perm = 0;
+
+            if (mode.equals("r")) {
+                flags = 0;
+                perm = 0;
+            } else if (mode.equals("w")) {
+                flags = 577;
+                perm = 438;
+            } else if (mode.equals("a")) {
+                flags = 1089;
+                perm = 438;
+            } else if (mode.equals("r+")) {
+                flags = 2;
+                perm = 0;
+            } else if (mode.equals("w+")) {
+                flags = 578;
+                perm = 438;
+            } else if (mode.equals("a+")) {
+                flags = 1090;
+                perm = 438;
+            } else if (mode.equals("wx")) {
+                flags = 193;
+                perm = 438;
+            } else {
+                self.errorCode = -22;
+                return false;
+            }
+
+            self.handle = syscalls::open(path, flags, perm);
+            self.opened = self.handle >= 0;
+            self.errorCode = self.opened ? 0 : self.handle;
+            if (self.opened) {
+                self.pathValue = path;
+            }
+            return self.opened;
+        }
+
+        public read(count: int): String {
+            String result = new String();
+            if (!self.opened || self.handle < 0 || count <= 0) {
+                return result;
+            }
+
+            String buffer = new String();
+            buffer.reserve(count + 2);
+            int got = syscalls::read(self.handle, buffer, count);
+            if (got <= 0) {
+                if (got < 0) {
+                    self.errorCode = got;
+                }
+                return result;
+            }
+
+            int i = 0;
+            while (i < got) {
+                result.appendByte(buffer.byteAt(i));
+                i = i + 1;
+            }
+            return result;
+        }
+
+        public readAll(): String {
+            String result = new String();
+            while (true) {
+                String chunk = self.read(4096);
+                if (chunk.isEmpty()) {
+                    break;
+                }
+                result.append(chunk);
+            }
+            return result;
+        }
+
+        public write(data: String): int {
+            if (!self.opened || self.handle < 0) {
+                self.errorCode = -9;
+                return -9;
+            }
+            int written = syscalls::write(self.handle, data, data.length());
+            if (written < 0) {
+                self.errorCode = written;
+            }
+            return written;
+        }
+
+        public writeAll(data: String): bool {
+            if (!self.opened || self.handle < 0) {
+                self.errorCode = -9;
+                return false;
+            }
+
+            int total = 0;
+            int len = data.length();
+            while (total < len) {
+                String remaining = data.substring(total, len - total);
+                int written = syscalls::write(self.handle, remaining, remaining.length());
+                if (written <= 0) {
+                    self.errorCode = written < 0 ? written : -5;
+                    return false;
+                }
+                total = total + written;
+            }
+            return true;
+        }
+
+        public seek(offset: int, whence: int): int {
+            if (!self.opened || self.handle < 0) {
+                self.errorCode = -9;
+                return -9;
+            }
+            int result = syscalls::lseek(self.handle, offset, whence);
+            if (result < 0) {
+                self.errorCode = result;
+            }
+            return result;
+        }
+
+        public tell(): int {
+            return self.seek(0, 1);
+        }
+
+        public size(): int {
+            if (!self.opened || self.handle < 0) {
+                self.errorCode = -9;
+                return -9;
+            }
+            int current = self.seek(0, 1);
+            if (current < 0) {
+                return current;
+            }
+            int end = self.seek(0, 2);
+            if (end < 0) {
+                return end;
+            }
+            self.seek(current, 0);
+            return end;
+        }
+
+        public truncate(length: int): int {
+            if (!self.opened || self.handle < 0) {
+                self.errorCode = -9;
+                return -9;
+            }
+            int result = syscalls::ftruncate(self.handle, length);
+            if (result != 0) {
+                self.errorCode = result;
+            }
+            return result;
+        }
+
+        public sync(): int {
+            if (!self.opened || self.handle < 0) {
+                self.errorCode = -9;
+                return -9;
+            }
+            int result = syscalls::fsync(self.handle);
+            if (result != 0) {
+                self.errorCode = result;
+            }
+            return result;
+        }
+
+        public close(): void {
+            if (self.opened) {
+                if (self.handle >= 0) {
+                    syscalls::close(self.handle);
+                }
+                self.handle = -1;
+                self.opened = false;
+            }
+        }
+
+        public isOpen(): bool {
+            return self.opened;
+        }
+
+        public error(): int {
+            return self.errorCode;
+        }
+
+        public errorText(): String {
+            return errorText(self.errorCode);
+        }
+
+        public path(): String {
+            return self.pathValue;
+        }
+
+        public ~File() {
+            self.close();
+        }
+    }
+
+    public class Dir {
+        private handle: int;
+        private opened: bool;
+        private done: bool;
+        private errorCode: int;
+        private offset: int;
+        private count: int;
+        private pathValue: String;
+        private buffer: String;
+
+        public Dir() {
+            self.handle = -1;
+            self.opened = false;
+            self.done = false;
+            self.errorCode = 0;
+            self.offset = 0;
+            self.count = 0;
+            self.pathValue = new String();
+            self.buffer = new String();
+            self.buffer.reserve(DIR_BUFFER_SIZE());
+        }
+
+        public Dir(path: String) {
+            self.handle = -1;
+            self.opened = false;
+            self.done = false;
+            self.errorCode = 0;
+            self.offset = 0;
+            self.count = 0;
+            self.pathValue = new String();
+            self.buffer = new String();
+            self.buffer.reserve(DIR_BUFFER_SIZE());
+            self.open(path);
+        }
+
+        public open(path: String): bool {
+            if (self.opened) {
+                self.close();
+            }
+            self.errorCode = 0;
+            self.done = false;
+            self.offset = 0;
+            self.count = 0;
+            self.handle = syscalls::open(path, 589824, 0);
+            self.opened = self.handle >= 0;
+            if (!self.opened) {
+                self.errorCode = self.handle;
+                return false;
+            }
+            self.pathValue = path;
+            return true;
+        }
+
+        public next(): String {
+            if (!self.opened || self.done) {
+                return new String();
+            }
+
+            while (true) {
+                if (self.offset >= self.count) {
+                    int got = syscalls::getdents64(self.handle, self.buffer, DIR_BUFFER_SIZE());
+                    if (got < 0) {
+                        self.errorCode = got;
+                        self.done = true;
+                        return new String();
+                    }
+                    if (got == 0) {
+                        self.done = true;
+                        return new String();
+                    }
+                    self.count = got;
+                    self.offset = 0;
+                }
+
+                if (self.offset + 19 > self.count) {
+                    self.done = true;
+                    return new String();
+                }
+
+                int recordLength = readU16(self.buffer, self.offset + 16);
+                if (recordLength <= 0) {
+                    self.done = true;
+                    return new String();
+                }
+
+                String name = readName(self.buffer, self.offset + 19);
+                self.offset = self.offset + recordLength;
+                if (name.equals(".") || name.equals("..")) {
+                    continue;
+                }
+                return name;
+            }
+        }
+
+        public entries(): Vector<String> {
+            Vector<String> names = new Vector<String>();
+            if (!self.opened) {
+                return names;
+            }
+
+            while (true) {
+                String name = self.next();
+                if (name.isEmpty()) {
+                    break;
+                }
+                names.push(name);
+            }
+            return names;
+        }
+
+        public close(): void {
+            if (self.opened) {
+                if (self.handle >= 0) {
+                    syscalls::close(self.handle);
+                }
+                self.handle = -1;
+                self.opened = false;
+            }
+        }
+
+        public isOpen(): bool {
+            return self.opened;
+        }
+
+        public error(): int {
+            return self.errorCode;
+        }
+
+        public errorText(): String {
+            return errorText(self.errorCode);
+        }
+
+        public path(): String {
+            return self.pathValue;
+        }
+
+        public ~Dir() {
+            self.close();
+        }
+    }
+
+    public exists(path: String): bool {
+        Stat info = new Stat(path);
+        return info.error() == 0;
+    }
+
+    public kind(path: String): FileKind {
+        Stat info = new Stat(path);
+        if (info.error() != 0) {
+            return FileKind.Unknown;
+        }
+        return info.kind();
+    }
+
+    public isFile(path: String): bool {
+        return kind(path) == FileKind.File;
+    }
+
+    public isDirectory(path: String): bool {
+        return kind(path) == FileKind.Directory;
+    }
+
+    public isSymlink(path: String): bool {
+        Stat info = new Stat(path, 256);
+        return info.kind() == FileKind.Symlink;
+    }
+
+    public stat(path: String): Stat throws Exception {
+        Stat info = new Stat(path);
+        if (info.error() != 0) {
+            fail(info.error());
+        }
+        return info;
+    }
+
+    public lstat(path: String): Stat throws Exception {
+        Stat info = new Stat(path, 256);
+        if (info.error() != 0) {
+            fail(info.error());
+        }
+        return info;
+    }
+
+    public fileSize(path: String): int throws Exception {
+        Stat info = stat(path);
+        return info.size();
+    }
+
+    public list(path: String): Vector<String> throws Exception {
+        Dir dir = new Dir(path);
+        if (!dir.isOpen()) {
+            fail(dir.error());
+        }
+        Vector<String> names = dir.entries();
+        int result = dir.error();
+        dir.close();
+        if (result != 0) {
+            fail(result);
+        }
+        return names;
+    }
+
+    public readFile(path: String): String throws Exception {
+        File file = new File();
+        if (!file.open(path, "r")) {
+            fail(file.error());
+        }
+        String result = file.readAll();
+        int code = file.error();
+        file.close();
+        if (code != 0) {
+            fail(code);
+        }
+        return result;
+    }
+
+    public writeFile(path: String, data: String): void throws Exception {
+        File file = new File();
+        if (!file.open(path, "w")) {
+            fail(file.error());
+        }
+        bool ok = file.writeAll(data);
+        int code = file.error();
+        file.close();
+        if (!ok) {
+            fail(code);
+        }
+    }
+
+    public appendFile(path: String, data: String): void throws Exception {
+        File file = new File();
+        if (!file.open(path, "a")) {
+            fail(file.error());
+        }
+        bool ok = file.writeAll(data);
+        int code = file.error();
+        file.close();
+        if (!ok) {
+            fail(code);
+        }
+    }
+
+    public mkdir(path: String): void throws Exception {
+        int result = syscalls::mkdir(path, 493);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public mkdir(path: String, permissions: int): void throws Exception {
+        int result = syscalls::mkdir(path, permissions);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public mkdirAll(path: String): void throws Exception {
+        mkdirAll(path, 493);
+    }
+
+    public mkdirAll(path: String, permissions: int): void throws Exception {
+        int result = mkdirAllCode(path, permissions);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    private mkdirAllCode(path: String, permissions: int): int {
+        if (path.isEmpty()) {
+            return -22;
+        }
+        if (exists(path) && isDirectory(path)) {
+            return 0;
+        }
+
+        String prefix = new String();
+        int i = 0;
+        if (path.byteAt(0) == '/') {
+            prefix.append("/");
+            i = 1;
+        }
+
+        while (i <= path.length()) {
+            int start = i;
+            while (i < path.length() && path.byteAt(i) != '/') {
+                i = i + 1;
+            }
+            int len = i - start;
+            if (len > 0) {
+                if (!prefix.isEmpty() && prefix.byteAt(prefix.length() - 1) != '/') {
+                    prefix.append("/");
+                }
+                prefix.append(path.substring(start, len));
+                if (!isDirectory(prefix)) {
+                    int result = syscalls::mkdir(prefix, permissions);
+                    if (result != 0) {
+                        return result;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        return 0;
+    }
+
+    public remove(path: String): void throws Exception {
+        Stat info = new Stat(path, 256);
+        if (info.error() != 0) {
+            fail(info.error());
+        }
+        int result = info.isDirectory() ? syscalls::rmdir(path) : syscalls::unlink(path);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public removeDir(path: String): void throws Exception {
+        int result = syscalls::rmdir(path);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public removeAll(path: String): void throws Exception {
+        int result = removeAllCode(path);
+        if (result != 0 && result != -2) {
+            fail(result);
+        }
+    }
+
+    private removeAllCode(path: String): int {
+        Stat info = new Stat(path, 256);
+        if (info.error() != 0) {
+            return info.error();
+        }
+        if (!info.isDirectory()) {
+            return syscalls::unlink(path);
+        }
+
+        Dir dir = new Dir(path);
+        if (!dir.isOpen()) {
+            return dir.error();
+        }
+
+        while (true) {
+            String name = dir.next();
+            if (name.isEmpty()) {
+                break;
+            }
+            int result = removeAllCode(join(path, name));
+            if (result != 0) {
+                dir.close();
+                return result;
+            }
+        }
+        dir.close();
+        return syscalls::rmdir(path);
+    }
+
+    public rename(oldPath: String, newPath: String): void throws Exception {
+        int result = syscalls::rename(oldPath, newPath);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public copyFile(sourcePath: String, targetPath: String): void throws Exception {
+        int result = copyFileCode(sourcePath, targetPath);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    private copyFileCode(sourcePath: String, targetPath: String): int {
+        File source = new File();
+        if (!source.open(sourcePath, "r")) {
+            return source.error();
+        }
+        File target = new File();
+        if (!target.open(targetPath, "w")) {
+            int result = target.error();
+            source.close();
+            return result;
+        }
+
+        int result = 0;
+        while (true) {
+            String chunk = source.read(8192);
+            if (chunk.isEmpty()) {
+                if (source.error() != 0) {
+                    result = source.error();
+                }
+                break;
+            }
+            if (!target.writeAll(chunk)) {
+                result = target.error();
+                break;
+            }
+        }
+
+        source.close();
+        target.close();
+        return result;
+    }
+
+    public createSymlink(target: String, linkPath: String): void throws Exception {
+        int result = syscalls::symlink(target, linkPath);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public readSymlink(path: String): String throws Exception {
+        String buffer = new String();
+        buffer.reserve(4096);
+        int count = syscalls::readlink(path, buffer, 4096);
+        if (count < 0) {
+            fail(count);
+        }
+        String result = new String();
+        if (count == 0) {
+            return result;
+        }
+        int i = 0;
+        while (i < count) {
+            result.appendByte(buffer.byteAt(i));
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public createLink(oldPath: String, newPath: String): void throws Exception {
+        int result = syscalls::link(oldPath, newPath);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public chmod(path: String, permissions: int): void throws Exception {
+        int result = syscalls::chmod(path, permissions);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public chown(path: String, owner: int, group: int): void throws Exception {
+        int result = syscalls::chown(path, owner, group);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public truncate(path: String, length: int): void throws Exception {
+        int result = syscalls::truncate(path, length);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public currentDir(): String throws Exception {
+        String buffer = new String();
+        buffer.reserve(4096);
+        int count = syscalls::getcwd(buffer, 4096);
+        if (count <= 0) {
+            fail(count);
+        }
+        String result = new String();
+        int i = 0;
+        while (i < 4096 && byteValue(buffer.byteAt(i)) != 0) {
+            result.appendByte(buffer.byteAt(i));
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public changeDir(path: String): void throws Exception {
+        int result = syscalls::chdir(path);
+        if (result != 0) {
+            fail(result);
+        }
+    }
+
+    public tempDir(): String {
+        return "/tmp";
+    }
+
+    public join(base: String, child: String): String {
+        if (base.isEmpty()) {
+            return child;
+        }
+        if (child.isEmpty()) {
+            return base;
+        }
+        if (child.byteAt(0) == '/') {
+            return child;
+        }
+        String result = new String();
+        result.append(base);
+        if (result.byteAt(result.length() - 1) != '/') {
+            result.append("/");
+        }
+        result.append(child);
+        return result;
+    }
+
+    public isAbsolute(path: String): bool {
+        return !path.isEmpty() && path.byteAt(0) == '/';
+    }
+
+    public isRelative(path: String): bool {
+        return !isAbsolute(path);
+    }
+
+    public basename(path: String): String {
+        if (path.isEmpty()) {
+            return ".";
+        }
+        int end = path.length();
+        while (end > 0 && path.byteAt(end - 1) == '/') {
+            end = end - 1;
+        }
+        if (end == 0) {
+            return "/";
+        }
+        int start = end - 1;
+        while (start > 0 && path.byteAt(start - 1) != '/') {
+            start = start - 1;
+        }
+        return path.substring(start, end - start);
+    }
+
+    public dirname(path: String): String {
+        if (path.isEmpty()) {
+            return ".";
+        }
+        int end = path.length();
+        while (end > 0 && path.byteAt(end - 1) == '/') {
+            end = end - 1;
+        }
+        while (end > 0 && path.byteAt(end - 1) != '/') {
+            end = end - 1;
+        }
+        if (end == 0) {
+            if (path.byteAt(0) == '/') {
+                return "/";
+            }
+            return ".";
+        }
+        while (end > 1 && path.byteAt(end - 1) == '/') {
+            end = end - 1;
+        }
+        return path.substring(0, end);
+    }
+}

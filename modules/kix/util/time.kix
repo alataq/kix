@@ -1,0 +1,113 @@
+import kix.string;
+import kix.util.bytes;
+import kix.util.text;
+import kix.syscalls;
+import kix.error.exceptions;
+
+namespace time {
+    public nowSeconds(): int throws Exception {
+        Bytes buffer = new Bytes();
+        int i = 0;
+        while (i < 16) {
+            buffer.appendByte(0);
+            i = i + 1;
+        }
+        int result = syscalls::gettimeofday(buffer.raw(), new String());
+        if (result != 0) {
+            throw new Exception(ExceptionKind.Io, result, "gettimeofday failed");
+        }
+        return buffer.readU64LE(0);
+    }
+
+    public nowMillis(): int throws Exception {
+        Bytes buffer = new Bytes();
+        int i = 0;
+        while (i < 16) {
+            buffer.appendByte(0);
+            i = i + 1;
+        }
+        int result = syscalls::gettimeofday(buffer.raw(), new String());
+        if (result != 0) {
+            throw new Exception(ExceptionKind.Io, result, "gettimeofday failed");
+        }
+        int seconds = buffer.readU64LE(0);
+        int micros = buffer.readU64LE(8);
+        return seconds * 1000 + micros / 1000;
+    }
+
+    public nowMicros(): int throws Exception {
+        Bytes buffer = new Bytes();
+        int i = 0;
+        while (i < 16) {
+            buffer.appendByte(0);
+            i = i + 1;
+        }
+        int result = syscalls::gettimeofday(buffer.raw(), new String());
+        if (result != 0) {
+            throw new Exception(ExceptionKind.Io, result, "gettimeofday failed");
+        }
+        return buffer.readU64LE(0) * 1000000 + buffer.readU64LE(8);
+    }
+
+    public sleepMillis(milliseconds: int): void throws Exception {
+        if (milliseconds < 0) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "negative sleep");
+        }
+        Bytes request = new Bytes();
+        int i = 0;
+        while (i < 16) {
+            request.appendByte(0);
+            i = i + 1;
+        }
+        request.writeU64LE(0, milliseconds / 1000);
+        request.writeU64LE(8, (milliseconds % 1000) * 1000000);
+        int result = syscalls::nanosleep(request.raw(), new String());
+        if (result != 0) {
+            throw new Exception(ExceptionKind.Io, result, "nanosleep failed");
+        }
+    }
+
+    public formatUnix(seconds: int): String {
+        if (seconds < 0) seconds = 0;
+        int days = seconds / 86400;
+        int remainder = seconds % 86400;
+        int hour = remainder / 3600;
+        int minute = (remainder % 3600) / 60;
+        int second = remainder % 60;
+
+        int z = days + 719468;
+        int era = z / 146097;
+        int doe = z - era * 146097;
+        int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        int year = yoe + era * 400;
+        int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        int mp = (5 * doy + 2) / 153;
+        int day = doy - (153 * mp + 2) / 5 + 1;
+        int month = mp;
+        if (mp < 10) {
+            month = mp + 3;
+        } else {
+            month = mp - 9;
+        }
+        if (month <= 2) year = year + 1;
+
+        String result = new String();
+        result.append(text::padLeft(text::intToString(year), 4, '0'));
+        result.append("-");
+        result.append(text::padLeft(text::intToString(month), 2, '0'));
+        result.append("-");
+        result.append(text::padLeft(text::intToString(day), 2, '0'));
+        result.append("T");
+        result.append(text::padLeft(text::intToString(hour), 2, '0'));
+        result.append(":");
+        result.append(text::padLeft(text::intToString(minute), 2, '0'));
+        result.append(":");
+        result.append(text::padLeft(text::intToString(second), 2, '0'));
+        result.append("Z");
+        return result;
+    }
+
+    public formatNow(): String throws Exception {
+        return formatUnix(nowSeconds());
+    }
+}

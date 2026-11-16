@@ -1,0 +1,111 @@
+import kix.string;
+import kix.util.text;
+import kix.collections;
+import kix.vector;
+import kix.error.exceptions;
+
+namespace mime {
+    public class MediaType {
+        public type: String;
+        public subtype: String;
+        public parameters: StringMap<String>;
+
+        public MediaType(type: String, subtype: String) {
+            self.type = type;
+            self.subtype = subtype;
+            self.parameters = new StringMap<String>();
+        }
+
+        public isText(): bool {
+            if (self.type.equals("text")) return true;
+            if (self.subtype.equals("json")) return true;
+            if (self.subtype.equals("xml")) return true;
+            if (self.subtype.equals("javascript")) return true;
+            if (self.subtype.equals("x-www-form-urlencoded")) return true;
+            return false;
+        }
+
+        public toString(): String {
+            String result = new String();
+            result.append(self.type);
+            result.append("/");
+            result.append(self.subtype);
+            Vector<String> keys = self.parameters.keys();
+            int i = 0;
+            while (i < keys.length()) {
+                String key = keys.at(i);
+                result.append("; ");
+                result.append(key);
+                result.append("=");
+                result.append(self.parameters.getOr(key, ""));
+                i = i + 1;
+            }
+            return result;
+        }
+    }
+
+    public parse(value: String): MediaType throws Exception {
+        Vector<String> parts = text::split(value, ";");
+        String base = text::trim(parts.at(0));
+        int slash = text::indexOf(base, "/");
+        if (slash <= 0 || slash + 1 >= base.length()) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid media type");
+        }
+        MediaType result = new MediaType(
+            text::trim(base.substring(0, slash)),
+            text::trim(base.substring(slash + 1, base.length() - slash - 1))
+        );
+        int i = 1;
+        while (i < parts.length()) {
+            String parameter = text::trim(parts.at(i));
+            int equals = text::indexOf(parameter, "=");
+            if (equals > 0) {
+                String key = text::trim(parameter.substring(0, equals));
+                String valuePart = text::trim(parameter.substring(equals + 1, parameter.length() - equals - 1));
+                if (valuePart.length() >= 2 && valuePart.byteAt(0) == '"' && valuePart.byteAt(valuePart.length() - 1) == '"') {
+                    valuePart = valuePart.substring(1, valuePart.length() - 2);
+                }
+                result.parameters.put(key, valuePart);
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public contentTypeForExtension(extension: String): String {
+        if (extension.equals("html") || extension.equals("htm")) return "text/html";
+        if (extension.equals("css")) return "text/css";
+        if (extension.equals("js")) return "application/javascript";
+        if (extension.equals("json")) return "application/json";
+        if (extension.equals("xml")) return "application/xml";
+        if (extension.equals("txt")) return "text/plain";
+        if (extension.equals("csv")) return "text/csv";
+        if (extension.equals("png")) return "image/png";
+        if (extension.equals("jpg") || extension.equals("jpeg")) return "image/jpeg";
+        if (extension.equals("gif")) return "image/gif";
+        if (extension.equals("svg")) return "image/svg+xml";
+        if (extension.equals("pdf")) return "application/pdf";
+        if (extension.equals("wasm")) return "application/wasm";
+        return "application/octet-stream";
+    }
+
+    public extensionFor(contentType: String): String {
+        String value = text::trim(contentType);
+        int semicolon = text::indexOf(value, ";");
+        if (semicolon >= 0) value = text::trim(value.substring(0, semicolon));
+        if (value.equals("text/html")) return "html";
+        if (value.equals("text/css")) return "css";
+        if (value.equals("application/javascript")) return "js";
+        if (value.equals("application/json")) return "json";
+        if (value.equals("application/xml") || value.equals("text/xml")) return "xml";
+        if (value.equals("text/plain")) return "txt";
+        if (value.equals("text/csv")) return "csv";
+        if (value.equals("image/png")) return "png";
+        if (value.equals("image/jpeg")) return "jpg";
+        if (value.equals("image/gif")) return "gif";
+        if (value.equals("image/svg+xml")) return "svg";
+        if (value.equals("application/pdf")) return "pdf";
+        if (value.equals("application/wasm")) return "wasm";
+        return "bin";
+    }
+}

@@ -1,0 +1,34 @@
+import kix.string;
+import kix.util.encoding;
+import kix.util.random;
+import kix.error.exceptions;
+
+namespace uuid {
+    public nil(): String {
+        return "00000000-0000-0000-0000-000000000000";
+    }
+
+    public v4(): String throws Exception {
+        String data = random::bytes(16);
+        int v = data.byteAt(6);
+        if (v < 0) v = v + 256;
+        v = (v & 15) | 64;
+        data.setByte(6, v as char);
+        int r = data.byteAt(8);
+        if (r < 0) r = r + 256;
+        r = (r & 63) | 128;
+        data.setByte(8, r as char);
+        String hex = encoding::hexEncode(data);
+        String result = new String();
+        result.append(hex.substring(0, 8));
+        result.append("-");
+        result.append(hex.substring(8, 4));
+        result.append("-");
+        result.append(hex.substring(12, 4));
+        result.append("-");
+        result.append(hex.substring(16, 4));
+        result.append("-");
+        result.append(hex.substring(20, 12));
+        return result;
+    }
+}

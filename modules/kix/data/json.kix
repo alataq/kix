@@ -1,0 +1,347 @@
+import kix.string;
+import kix.vector;
+import kix.util.text;
+import kix.util.unicode;
+import kix.collections;
+import kix.data.serde;
+import kix.error.exceptions;
+
+namespace json {
+    private charAt(text: String, index: int): int {
+        int value = text.byteAt(index);
+        if (value < 0) value = value + 256;
+        return value;
+    }
+
+    private hexValue(value: int): int {
+        if (value >= 48 && value <= 57) return value - 48;
+        if (value >= 65 && value <= 70) return value - 55;
+        if (value >= 97 && value <= 102) return value - 87;
+        return -1;
+    }
+
+    public class Parser {
+        private source: String;
+        private index: int;
+
+        public Parser(source: String) {
+            self.source = source;
+            self.index = 0;
+        }
+
+        public parse(): Value throws Exception {
+            self.skipWhitespace();
+            Value result = self.parseValue();
+            self.skipWhitespace();
+            if (self.index != self.source.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "trailing JSON data");
+            }
+            return result;
+        }
+
+        private error(message: String): void throws Exception {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, message);
+        }
+
+        private skipWhitespace(): void {
+            while (self.index < self.source.length()) {
+                int value = charAt(self.source, self.index);
+                if (value == 32 || value == 9 || value == 10 || value == 13) {
+                    self.index = self.index + 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        private expect(character: int): void throws Exception {
+            if (self.index >= self.source.length() || charAt(self.source, self.index) != character) {
+                self.error("unexpected JSON token");
+            }
+            self.index = self.index + 1;
+        }
+
+        private parseValue(): Value throws Exception {
+            self.skipWhitespace();
+            if (self.index >= self.source.length()) self.error("unexpected end of JSON");
+            int value = charAt(self.source, self.index);
+            if (value == 110) {
+                self.readLiteral("null");
+                return new Value(Kind.Null);
+            }
+            if (value == 116) {
+                self.readLiteral("true");
+                return new Value(true);
+            }
+            if (value == 102) {
+                self.readLiteral("false");
+                return new Value(false);
+            }
+            if (value == 34) return new Value(self.parseString());
+            if (value == 91) return self.parseArray();
+            if (value == 123) return self.parseObject();
+            if (value == 45 || (value >= 48 && value <= 57)) return self.parseNumber();
+            self.error("invalid JSON value");
+            return new Value(Kind.Null);
+        }
+
+        private readLiteral(value: String): void throws Exception {
+            int i = 0;
+            while (i < value.length()) {
+                if (self.index >= self.source.length() || charAt(self.source, self.index) != charAt(value, i)) {
+                    self.error("invalid JSON literal");
+                }
+                self.index = self.index + 1;
+                i = i + 1;
+            }
+        }
+
+        private parseString(): String throws Exception {
+            self.expect(34);
+            String result = new String();
+            while (self.index < self.source.length()) {
+                int value = charAt(self.source, self.index);
+                self.index = self.index + 1;
+                if (value == 34) return result;
+                if (value == 92) {
+                    if (self.index >= self.source.length()) self.error("invalid JSON escape");
+                    int escape = charAt(self.source, self.index);
+                    self.index = self.index + 1;
+                    if (escape == 34) result.appendByte('"');
+                    else if (escape == 92) result.appendByte('\\');
+                    else if (escape == 47) result.appendByte('/');
+                    else if (escape == 98) result.appendByte('\x08');
+                    else if (escape == 102) result.appendByte('\x0c');
+                    else if (escape == 110) result.appendByte('\n');
+                    else if (escape == 114) result.appendByte('\r');
+                    else if (escape == 116) result.appendByte('\t');
+                    else if (escape == 117) {
+                        if (self.index + 4 > self.source.length()) self.error("invalid unicode escape");
+                        int codepoint = 0;
+                        int i = 0;
+                        while (i < 4) {
+                            int digit = hexValue(charAt(self.source, self.index));
+                            if (digit < 0) self.error("invalid unicode escape");
+                            codepoint = codepoint * 16 + digit;
+                            self.index = self.index + 1;
+                            i = i + 1;
+                        }
+                        result.append(unicode::fromCodepoint(codepoint));
+                    } else {
+                        self.error("invalid JSON escape");
+                    }
+                } else {
+                    result.appendByte(value as char);
+                }
+            }
+            self.error("unterminated JSON string");
+            return result;
+        }
+
+        private parseNumber(): Value throws Exception {
+            int start = self.index;
+            bool isFloat = false;
+            if (charAt(self.source, self.index) == 45) self.index = self.index + 1;
+            while (self.index < self.source.length()) {
+                int value = charAt(self.source, self.index);
+                if (value >= 48 && value <= 57) {
+                    self.index = self.index + 1;
+                } else {
+                    break;
+                }
+            }
+            if (self.index < self.source.length() && charAt(self.source, self.index) == 46) {
+                isFloat = true;
+                self.index = self.index + 1;
+                while (self.index < self.source.length()) {
+                    int value = charAt(self.source, self.index);
+                    if (value >= 48 && value <= 57) self.index = self.index + 1;
+                    else break;
+                }
+            }
+            if (self.index < self.source.length()) {
+                int value = charAt(self.source, self.index);
+                if (value == 101 || value == 69) {
+                    isFloat = true;
+                    self.index = self.index + 1;
+                    if (self.index < self.source.length()) {
+                        int sign = charAt(self.source, self.index);
+                        if (sign == 43 || sign == 45) self.index = self.index + 1;
+                    }
+                    while (self.index < self.source.length()) {
+                        int digit = charAt(self.source, self.index);
+                        if (digit >= 48 && digit <= 57) self.index = self.index + 1;
+                        else break;
+                    }
+                }
+            }
+            String token = self.source.substring(start, self.index - start);
+            if (!isFloat) {
+                return new Value(text::parseInt(token));
+            }
+            int i = 0;
+            bool negative = false;
+            if (token.byteAt(0) == '-') { negative = true; i = 1; }
+            float number = 0.0;
+            while (i < token.length()) {
+                int value = charAt(token, i);
+                if (value < 48 || value > 57) break;
+                number = number * 10.0 + (value - 48);
+                i = i + 1;
+            }
+            if (i < token.length() && charAt(token, i) == 46) {
+                i = i + 1;
+                float scale = 0.1;
+                while (i < token.length()) {
+                    int value = charAt(token, i);
+                    if (value < 48 || value > 57) break;
+                    number = number + (value - 48) * scale;
+                    scale = scale * 0.1;
+                    i = i + 1;
+                }
+            }
+            int exponent = 0;
+            bool exponentNegative = false;
+            if (i < token.length() && (charAt(token, i) == 101 || charAt(token, i) == 69)) {
+                i = i + 1;
+                if (i < token.length() && charAt(token, i) == 45) { exponentNegative = true; i = i + 1; }
+                else if (i < token.length() && charAt(token, i) == 43) i = i + 1;
+                while (i < token.length()) {
+                    int value = charAt(token, i);
+                    if (value < 48 || value > 57) break;
+                    exponent = exponent * 10 + (value - 48);
+                    i = i + 1;
+                }
+            }
+            int e = 0;
+            while (e < exponent) {
+                if (exponentNegative) number = number / 10.0;
+                else number = number * 10.0;
+                e = e + 1;
+            }
+            if (negative) number = 0.0 - number;
+            return new Value(number);
+        }
+
+        private parseArray(): Value throws Exception {
+            self.expect(91);
+            Vector<Value> values = new Vector<Value>();
+            self.skipWhitespace();
+            if (self.index < self.source.length() && charAt(self.source, self.index) == 93) {
+                self.index = self.index + 1;
+                return new Value(values);
+            }
+            while (true) {
+                values.push(self.parseValue());
+                self.skipWhitespace();
+                if (self.index < self.source.length() && charAt(self.source, self.index) == 44) {
+                    self.index = self.index + 1;
+                    continue;
+                }
+                self.expect(93);
+                break;
+            }
+            return new Value(values);
+        }
+
+        private parseObject(): Value throws Exception {
+            self.expect(123);
+            StringMap<Value> values = new StringMap<Value>();
+            self.skipWhitespace();
+            if (self.index < self.source.length() && charAt(self.source, self.index) == 125) {
+                self.index = self.index + 1;
+                return new Value(values);
+            }
+            while (true) {
+                self.skipWhitespace();
+                String key = self.parseString();
+                self.skipWhitespace();
+                self.expect(58);
+                values.put(key, self.parseValue());
+                self.skipWhitespace();
+                if (self.index < self.source.length() && charAt(self.source, self.index) == 44) {
+                    self.index = self.index + 1;
+                    continue;
+                }
+                self.expect(125);
+                break;
+            }
+            return new Value(values);
+        }
+    }
+
+    public parse(source: String): Value throws Exception {
+        Parser parser = new Parser(source);
+        return parser.parse();
+    }
+
+    private writeString(result: String, value: String): void {
+        result.appendByte('"');
+        int i = 0;
+        while (i < value.length()) {
+            int code = charAt(value, i);
+            if (code == 34) result.append("\\\"");
+            else if (code == 92) result.append("\\\\");
+            else if (code == 8) result.append("\\b");
+            else if (code == 12) result.append("\\f");
+            else if (code == 10) result.append("\\n");
+            else if (code == 13) result.append("\\r");
+            else if (code == 9) result.append("\\t");
+            else if (code < 32) {
+                result.append("\\u00");
+                int high = code / 16;
+                int low = code % 16;
+                if (high < 10) result.appendByte((48 + high) as char);
+                else result.appendByte((87 + high) as char);
+                if (low < 10) result.appendByte((48 + low) as char);
+                else result.appendByte((87 + low) as char);
+            } else {
+                result.appendByte(code as char);
+            }
+            i = i + 1;
+        }
+        result.appendByte('"');
+    }
+
+    private writeValue(result: String, value: Value): void throws Exception {
+        if (value.kind == Kind.Null) result.append("null");
+        else if (value.kind == Kind.Bool) {
+            if (value.boolValue) result.append("true");
+            else result.append("false");
+        } else if (value.kind == Kind.Int) {
+            result.append(text::intToString(value.intValue));
+        } else if (value.kind == Kind.Float) {
+            result.append(text::floatToString(value.floatValue, 6));
+        } else if (value.kind == Kind.String) {
+            writeString(result, value.stringValue);
+        } else if (value.kind == Kind.Array) {
+            result.appendByte('[');
+            int i = 0;
+            while (i < value.arrayValue.length()) {
+                if (i > 0) result.appendByte(',');
+                writeValue(result, value.arrayValue.at(i));
+                i = i + 1;
+            }
+            result.appendByte(']');
+        } else {
+            result.appendByte('{');
+            Vector<String> keys = value.objectValue.keys();
+            int i = 0;
+            while (i < keys.length()) {
+                if (i > 0) result.appendByte(',');
+                String key = keys.at(i);
+                writeString(result, key);
+                result.appendByte(':');
+                writeValue(result, value.objectValue.get(key));
+                i = i + 1;
+            }
+            result.appendByte('}');
+        }
+    }
+
+    public stringify(value: Value): String throws Exception {
+        String result = new String();
+        writeValue(result, value);
+        return result;
+    }
+}

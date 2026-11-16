@@ -1,0 +1,134 @@
+import kix.string;
+import kix.error.exceptions;
+
+namespace unicode {
+    public fromCodepoint(value: int): String throws Exception {
+        String result = new String();
+        if (value < 0 || value > 1114111) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid codepoint");
+        }
+        if (value <= 127) {
+            result.appendByte(value as char);
+        } else if (value <= 2047) {
+            result.appendByte((192 + (value >> 6)) as char);
+            result.appendByte((128 + (value & 63)) as char);
+        } else if (value <= 65535) {
+            result.appendByte((224 + (value >> 12)) as char);
+            result.appendByte((128 + ((value >> 6) & 63)) as char);
+            result.appendByte((128 + (value & 63)) as char);
+        } else {
+            result.appendByte((240 + (value >> 18)) as char);
+            result.appendByte((128 + ((value >> 12) & 63)) as char);
+            result.appendByte((128 + ((value >> 6) & 63)) as char);
+            result.appendByte((128 + (value & 63)) as char);
+        }
+        return result;
+    }
+
+    private byteAt(value: String, index: int): int {
+        int result = value.byteAt(index);
+        if (result < 0) result = result + 256;
+        return result;
+    }
+
+    public codepointAt(value: String, index: int): int throws Exception {
+        if (index < 0 || index >= value.length()) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "index out of range");
+        }
+        int first = byteAt(value, index);
+        if (first <= 127) return first;
+        if (first >= 194 && first <= 223) {
+            if (index + 1 >= value.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated utf8");
+            }
+            int b = byteAt(value, index + 1);
+            if ((b & 192) != 128) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid utf8");
+            }
+            return ((first & 31) << 6) | (b & 63);
+        }
+        if (first >= 224 && first <= 239) {
+            if (index + 2 >= value.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated utf8");
+            }
+            int b = byteAt(value, index + 1);
+            int c = byteAt(value, index + 2);
+            if ((b & 192) != 128 || (c & 192) != 128) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid utf8");
+            }
+            int result = ((first & 15) << 12) | ((b & 63) << 6) | (c & 63);
+            if (result < 2048) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "overlong utf8");
+            }
+            return result;
+        }
+        if (first >= 240 && first <= 244) {
+            if (index + 3 >= value.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated utf8");
+            }
+            int b = byteAt(value, index + 1);
+            int c = byteAt(value, index + 2);
+            int d = byteAt(value, index + 3);
+            if ((b & 192) != 128 || (c & 192) != 128 || (d & 192) != 128) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid utf8");
+            }
+            int result = ((first & 7) << 18) | ((b & 63) << 12) | ((c & 63) << 6) | (d & 63);
+            if (result < 65536 || result > 1114111 || (result >= 55296 && result <= 57343)) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid codepoint");
+            }
+            return result;
+        }
+        throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid utf8");
+    }
+
+    public isValid(value: String): bool {
+        int i = 0;
+        while (i < value.length()) {
+            int first = byteAt(value, i);
+            int length = 1;
+            if (first <= 127) {
+                length = 1;
+            } else if (first >= 194 && first <= 223) {
+                length = 2;
+            } else if (first >= 224 && first <= 239) {
+                length = 3;
+            } else if (first >= 240 && first <= 244) {
+                length = 4;
+            } else {
+                return false;
+            }
+            if (i + length > value.length()) return false;
+            int j = 1;
+            while (j < length) {
+                if ((byteAt(value, i + j) & 192) != 128) return false;
+                j = j + 1;
+            }
+            i = i + length;
+        }
+        return true;
+    }
+
+    public asciiUpper(value: String): String {
+        String result = new String();
+        int i = 0;
+        while (i < value.length()) {
+            int code = byteAt(value, i);
+            if (code >= 97 && code <= 122) code = code - 32;
+            result.appendByte(code as char);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public asciiLower(value: String): String {
+        String result = new String();
+        int i = 0;
+        while (i < value.length()) {
+            int code = byteAt(value, i);
+            if (code >= 65 && code <= 90) code = code + 32;
+            result.appendByte(code as char);
+            i = i + 1;
+        }
+        return result;
+    }
+}

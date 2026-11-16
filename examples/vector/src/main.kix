@@ -1,0 +1,79 @@
+import kix.io;
+import kix.error.exceptions;
+import kix.string;
+import kix.vector;
+
+public parseInt(text: String): int {
+    int value = 0;
+    int i = 0;
+    bool negative = false;
+
+    if (text.length() > 0 && text.byteAt(0) == 45) {
+        negative = true;
+        i = 1;
+    }
+
+    while (i < text.length()) {
+        int code = text.byteAt(i);
+        if (code < 48 || code > 57) {
+            break;
+        }
+        value = value * 10 + (code - 48);
+        i = i + 1;
+    }
+
+    if (negative) {
+        return 0 - value;
+    }
+    return value;
+}
+
+public main(): int throws Exception {
+    io::println("Vector demo: enter integers one per line, empty line to finish.");
+
+    Vector<int> values = new Vector<int>();
+
+    while (true) {
+        io::print("> ");
+        String line = io::readLine();
+        if (line.isEmpty()) {
+            break;
+        }
+        values.push(parseInt(line));
+    }
+
+    if (values.isEmpty()) {
+        io::println("No numbers entered.");
+        return 0;
+    }
+
+    int total = 0;
+    int minimum = values.at(0);
+    int maximum = values.at(0);
+
+    int i = 0;
+    while (i < values.length()) {
+        int value = values.at(i);
+        total = total + value;
+        if (value < minimum) {
+            minimum = value;
+        }
+        if (value > maximum) {
+            maximum = value;
+        }
+        i = i + 1;
+    }
+
+    io::printf("count=%lld capacity=%lld\n", values.length(), values.capacity());
+    io::printf("sum=%lld min=%lld max=%lld\n", total, minimum, maximum);
+    io::print("values:");
+
+    i = 0;
+    while (i < values.length()) {
+        io::printf(" %lld", values.at(i));
+        i = i + 1;
+    }
+    io::println("");
+
+    return 0;
+}

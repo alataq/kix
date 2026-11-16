@@ -1,0 +1,95 @@
+import kix.string;
+import kix.vector;
+import kix.util.path;
+import kix.util.text;
+import kix.fs;
+import kix.error.exceptions;
+
+namespace glob {
+    private charAt(value: String, index: int): char {
+        return value.byteAt(index);
+    }
+
+    public match(value: String, pattern: String): bool {
+        if (pattern.isEmpty()) return value.isEmpty();
+        char first = charAt(pattern, 0);
+        if (first == '*') {
+            if (match(value, pattern.substring(1, pattern.length() - 1))) return true;
+            if (!value.isEmpty()) {
+                return match(value.substring(1, value.length() - 1), pattern);
+            }
+            return false;
+        }
+        if (value.isEmpty()) return false;
+        if (first == '?') {
+            return match(value.substring(1, value.length() - 1), pattern.substring(1, pattern.length() - 1));
+        }
+        if (first != charAt(value, 0)) return false;
+        return match(value.substring(1, value.length() - 1), pattern.substring(1, pattern.length() - 1));
+    }
+
+    private hasWildcard(value: String): bool {
+        return text::contains(value, "*") || text::contains(value, "?");
+    }
+
+    private walk(
+        current: String,
+        segments: Vector<String>,
+        index: int,
+        result: Vector<String>,
+    ): void throws Exception {
+        if (index >= segments.length()) {
+            result.push(current);
+            return;
+        }
+        String segment = segments.at(index);
+        bool last = index + 1 == segments.length();
+        if (!hasWildcard(segment)) {
+            String next = path::join(current, segment);
+            if (last) {
+                if (fs::exists(next)) result.push(next);
+            } else if (fs::isDirectory(next)) {
+                walk(next, segments, index + 1, result);
+            }
+            return;
+        }
+        Vector<String> names = fs::list(current);
+        int i = 0;
+        while (i < names.length()) {
+            String name = names.at(i);
+            if (match(name, segment)) {
+                String next = path::join(current, name);
+                if (last) {
+                    result.push(next);
+                } else if (fs::isDirectory(next)) {
+                    walk(next, segments, index + 1, result);
+                }
+            }
+            i = i + 1;
+        }
+    }
+
+    public glob(pattern: String): Vector<String> throws Exception {
+        Vector<String> result = new Vector<String>();
+        if (pattern.isEmpty()) return result;
+        bool absolute = path::isAbsolute(pattern);
+        String working = pattern;
+        if (absolute) working = pattern.substring(1, pattern.length() - 1);
+        Vector<String> segments = text::split(working, "/");
+        Vector<String> filtered = new Vector<String>();
+        int i = 0;
+        while (i < segments.length()) {
+            String segment = segments.at(i);
+            if (!segment.isEmpty()) filtered.push(segment);
+            i = i + 1;
+        }
+        String root = ".";
+        if (absolute) root = "/";
+        if (filtered.isEmpty()) {
+            result.push(root);
+            return result;
+        }
+        walk(root, filtered, 0, result);
+        return result;
+    }
+}

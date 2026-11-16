@@ -1,0 +1,56 @@
+import kix.string;
+import kix.io;
+import kix.util.time;
+import kix.error.exceptions;
+
+namespace log {
+    public enum Level {
+        Debug,
+        Info,
+        Warn,
+        Error,
+    }
+
+    private levelName(level: Level): String {
+        if (level == Level.Debug) return "DEBUG";
+        if (level == Level.Info) return "INFO";
+        if (level == Level.Warn) return "WARN";
+        return "ERROR";
+    }
+
+    public class Logger {
+        private name: String;
+        private minimum: Level;
+
+        public Logger(name: String, minimum: Level) {
+            self.name = name;
+            self.minimum = minimum;
+        }
+
+        private write(level: Level, message: String): void throws Exception {
+            if (level < self.minimum) return;
+            String stamp = time::formatNow();
+            if (level == Level.Error || level == Level.Warn) {
+                io::printf("%s %s %s %s\n", stamp, levelName(level), self.name, message);
+            } else {
+                io::printf("%s %s %s %s\n", stamp, levelName(level), self.name, message);
+            }
+        }
+
+        public debug(message: String): void throws Exception {
+            self.write(Level.Debug, message);
+        }
+
+        public info(message: String): void throws Exception {
+            self.write(Level.Info, message);
+        }
+
+        public warn(message: String): void throws Exception {
+            self.write(Level.Warn, message);
+        }
+
+        public error(message: String): void throws Exception {
+            self.write(Level.Error, message);
+        }
+    }
+}

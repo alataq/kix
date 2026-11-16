@@ -1,0 +1,98 @@
+import kix.string;
+import kix.vector;
+import kix.util.text;
+import kix.data.serde;
+import kix.data.json;
+import kix.fs;
+import kix.error.exceptions;
+
+namespace config {
+    public class Config {
+        private root: Value;
+
+        public Config(value: Value) throws Exception {
+            if (value.kind != Kind.Object) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "config root must be an object");
+            }
+            self.root = value;
+        }
+
+        private valueAt(path: String): Value throws Exception {
+            Value current = self.root;
+            Vector<String> parts = text::split(path, ".");
+            int i = 0;
+            while (i < parts.length()) {
+                if (current.kind != Kind.Object) {
+                    throw new Exception(ExceptionKind.NotFound, -2, "config path not found");
+                }
+                String key = parts.at(i);
+                if (!current.objectValue.contains(key)) {
+                    throw new Exception(ExceptionKind.NotFound, -2, "config path not found");
+                }
+                current = current.objectValue.get(key);
+                i = i + 1;
+            }
+            return current;
+        }
+
+        public get(path: String): Value throws Exception {
+            return self.valueAt(path);
+        }
+
+        public string(path: String): String throws Exception {
+            Value value = self.valueAt(path);
+            if (value.kind != Kind.String) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "config value is not a string");
+            }
+            return value.stringValue;
+        }
+
+        public integer(path: String): int throws Exception {
+            Value value = self.valueAt(path);
+            if (value.kind != Kind.Int) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "config value is not an int");
+            }
+            return value.intValue;
+        }
+
+        public decimal(path: String): float throws Exception {
+            Value value = self.valueAt(path);
+            if (value.kind != Kind.Float) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "config value is not a float");
+            }
+            return value.floatValue;
+        }
+
+        public boolean(path: String): bool throws Exception {
+            Value value = self.valueAt(path);
+            if (value.kind != Kind.Bool) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "config value is not a bool");
+            }
+            return value.boolValue;
+        }
+
+        public stringOr(path: String, fallback: String): String {
+            try {
+                return self.string(path);
+            } catch (error: Exception) {
+                return fallback;
+            }
+        }
+
+        public intOr(path: String, fallback: int): int {
+            try {
+                return self.integer(path);
+            } catch (error: Exception) {
+                return fallback;
+            }
+        }
+    }
+
+    public fromJson(text: String): Config throws Exception {
+        return new Config(json::parse(text));
+    }
+
+    public load(path: String): Config throws Exception {
+        return fromJson(fs::readFile(path));
+    }
+}

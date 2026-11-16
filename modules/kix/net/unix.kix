@@ -1,0 +1,98 @@
+import kix.string;
+import kix.util.bytes;
+import kix.syscalls;
+import kix.net;
+import kix.error.exceptions;
+
+namespace net.unix {
+    private sockaddr(path: String): String throws Exception {
+        if (path.isEmpty() || path.length() > 107) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid Unix socket path");
+        }
+        Bytes buffer = new Bytes();
+        int i = 0;
+        while (i < 110) { buffer.appendByte(0); i = i + 1; }
+        buffer.writeU16LE(0, 1);
+        i = 0;
+        while (i < path.length()) {
+            buffer.setByte(2 + i, path.byteAt(i));
+            i = i + 1;
+        }
+        return buffer.raw();
+    }
+
+    private addressLength(path: String): int {
+        return 2 + path.length() + 1;
+    }
+
+    public connect(path: String): net::TcpConnection throws Exception {
+        int fd = syscalls::socket(1, 1, 0);
+        if (fd < 0) {
+            throw new Exception(ExceptionKind.Io, fd, "Unix socket failed");
+        }
+        int result = syscalls::connect(fd, sockaddr(path), addressLength(path));
+        if (result != 0) {
+            syscalls::close(fd);
+            throw new Exception(ExceptionKind.Io, result, "Unix connect failed");
+        }
+        return new net::TcpConnection(fd);
+    }
+
+    public class Listener {
+        private fd: int;
+        private closed: bool;
+
+        public Listener() {
+            self.fd = -1;
+            self.closed = true;
+        }
+
+        public bind(path: String): void throws Exception {
+            self.fd = syscalls::socket(1, 1, 0);
+            if (self.fd < 0) {
+                throw new Exception(ExceptionKind.Io, self.fd, "Unix socket failed");
+            }
+            int result = syscalls::bind(self.fd, sockaddr(path), addressLength(path));
+            if (result != 0) {
+                syscalls::close(self.fd);
+                self.fd = -1;
+                throw new Exception(ExceptionKind.Io, result, "Unix bind failed");
+            }
+            result = syscalls::listen(self.fd, 128);
+            if (result != 0) {
+                syscalls::close(self.fd);
+                self.fd = -1;
+                throw new Exception(ExceptionKind.Io, result, "Unix listen failed");
+            }
+            self.closed = false;
+        }
+
+        public accept(): net::TcpConnection throws Exception {
+            if (self.closed) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "Unix listener is closed");
+            }
+            String address = new String();
+            address.reserve(110);
+            String length = new String();
+            int i = 0;
+            while (i < 4) { length.appendByte(0 as char); i = i + 1; }
+            length.setByte(0, 110 as char);
+            int fd = syscalls::accept(self.fd, address, length);
+            if (fd < 0) {
+                throw new Exception(ExceptionKind.Io, fd, "Unix accept failed");
+            }
+            return new net::TcpConnection(fd);
+        }
+
+        public close(): void {
+            if (!self.closed) {
+                syscalls::close(self.fd);
+                self.closed = true;
+            }
+        }
+
+        public ~Listener() {
+            self.close();
+        }
+    }
+}

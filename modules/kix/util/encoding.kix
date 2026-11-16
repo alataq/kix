@@ -1,0 +1,135 @@
+import kix.string;
+import kix.error.exceptions;
+
+namespace encoding {
+    private hexDigit(value: int): char {
+        if (value < 10) return (48 + value) as char;
+        return (87 + value) as char;
+    }
+
+    private hexValue(value: char): int {
+        int code = value;
+        if (code >= 48 && code <= 57) return code - 48;
+        if (code >= 65 && code <= 70) return code - 55;
+        if (code >= 97 && code <= 102) return code - 87;
+        return -1;
+    }
+
+    public hexEncode(data: String): String {
+        String result = new String();
+        int i = 0;
+        while (i < data.length()) {
+            int value = data.byteAt(i);
+            if (value < 0) value = value + 256;
+            result.appendByte(hexDigit(value / 16));
+            result.appendByte(hexDigit(value % 16));
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public hexDecode(value: String): String throws Exception {
+        if (value.length() % 2 != 0) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid hex length");
+        }
+        String result = new String();
+        int i = 0;
+        while (i < value.length()) {
+            int high = hexValue(value.byteAt(i));
+            int low = hexValue(value.byteAt(i + 1));
+            if (high < 0 || low < 0) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid hex digit");
+            }
+            result.appendByte((high * 16 + low) as char);
+            i = i + 2;
+        }
+        return result;
+    }
+
+    private base64Value(value: int): char {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        return alphabet.byteAt(value);
+    }
+
+    private base64Index(value: char): int {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        int i = 0;
+        while (i < alphabet.length()) {
+            if (alphabet.byteAt(i) == value) return i;
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    public base64Encode(data: String): String {
+        String result = new String();
+        int i = 0;
+        while (i + 2 < data.length()) {
+            int a = data.byteAt(i);
+            int b = data.byteAt(i + 1);
+            int c = data.byteAt(i + 2);
+            if (a < 0) a = a + 256;
+            if (b < 0) b = b + 256;
+            if (c < 0) c = c + 256;
+            result.appendByte(base64Value(a >> 2));
+            result.appendByte(base64Value(((a & 3) << 4) | (b >> 4)));
+            result.appendByte(base64Value(((b & 15) << 2) | (c >> 6)));
+            result.appendByte(base64Value(c & 63));
+            i = i + 3;
+        }
+        if (i < data.length()) {
+            int a = data.byteAt(i);
+            if (a < 0) a = a + 256;
+            if (i + 1 < data.length()) {
+                int b = data.byteAt(i + 1);
+                if (b < 0) b = b + 256;
+                result.appendByte(base64Value(a >> 2));
+                result.appendByte(base64Value(((a & 3) << 4) | (b >> 4)));
+                result.appendByte(base64Value((b & 15) << 2));
+                result.appendByte('=');
+            } else {
+                result.appendByte(base64Value(a >> 2));
+                result.appendByte(base64Value((a & 3) << 4));
+                result.appendByte('=');
+                result.appendByte('=');
+            }
+        }
+        return result;
+    }
+
+    public base64Decode(value: String): String throws Exception {
+        String result = new String();
+        int i = 0;
+        while (i < value.length()) {
+            if (i + 3 >= value.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid base64 length");
+            }
+            char c0 = value.byteAt(i);
+            char c1 = value.byteAt(i + 1);
+            char c2 = value.byteAt(i + 2);
+            char c3 = value.byteAt(i + 3);
+            int a = base64Index(c0);
+            int b = base64Index(c1);
+            if (a < 0 || b < 0) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid base64");
+            }
+            result.appendByte(((a << 2) | (b >> 4)) as char);
+            if (c2 != '=') {
+                int c = base64Index(c2);
+                if (c < 0) {
+                    throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid base64");
+                }
+                result.appendByte((((b & 15) << 4) | (c >> 2)) as char);
+                if (c3 != '=') {
+                    int d = base64Index(c3);
+                    if (d < 0) {
+                        throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid base64");
+                    }
+                    result.appendByte((((c & 3) << 6) | d) as char);
+                }
+            }
+            i = i + 4;
+        }
+        return result;
+    }
+}

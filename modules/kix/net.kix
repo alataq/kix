@@ -1,0 +1,198 @@
+import kix.string;
+import kix.vector;
+import kix.util.text;
+import kix.util.bytes;
+import kix.syscalls;
+import kix.error.exceptions;
+
+namespace net {
+    private AF_INET(): int { return 2; }
+    private SOCK_STREAM(): int { return 1; }
+    private SOCK_DGRAM(): int { return 2; }
+
+    public class Address {
+        public host: String;
+        public port: int;
+
+        public Address(host: String, port: int) throws Exception {
+            self.host = host;
+            self.port = port;
+            self.validate();
+        }
+
+        private validate(): void throws Exception {
+            if (self.port < 0 || self.port > 65535) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid port");
+            }
+            Vector<String> parts = text::split(self.host, ".");
+            if (parts.length() != 4) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "IPv4 address required");
+            }
+            int i = 0;
+            while (i < 4) {
+                int value = text::parseInt(parts.at(i));
+                if (value < 0 || value > 255) {
+                    throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid IPv4 address");
+                }
+                i = i + 1;
+            }
+        }
+
+        public sockaddr(): String throws Exception {
+            Bytes buffer = new Bytes();
+            int i = 0;
+            while (i < 16) { buffer.appendByte(0); i = i + 1; }
+            buffer.writeU16LE(0, AF_INET());
+            buffer.writeU16BE(2, self.port);
+            Vector<String> parts = text::split(self.host, ".");
+            i = 0;
+            while (i < 4) {
+                buffer.setByte(4 + i, text::parseInt(parts.at(i)));
+                i = i + 1;
+            }
+            return buffer.raw();
+        }
+
+        public toString(): String {
+            String result = self.host.concat(":");
+            result.append(text::intToString(self.port));
+            return result;
+        }
+    }
+
+    public class TcpConnection {
+        private fd: int;
+        private closed: bool;
+
+        public TcpConnection(fd: int) {
+            self.fd = fd;
+            self.closed = false;
+        }
+
+        public descriptor(): int { return self.fd; }
+
+        public read(count: int): String throws Exception {
+            if (self.closed) return new String();
+            String buffer = new String();
+            buffer.reserve(count + 1);
+            int result = syscalls::read(self.fd, buffer, count);
+            if (result < 0) {
+                throw new Exception(ExceptionKind.Io, result, "socket read failed");
+            }
+            if (result == 0) return new String();
+            String output = new String();
+            int i = 0;
+            while (i < result) {
+                output.appendByte(buffer.byteAt(i));
+                i = i + 1;
+            }
+            return output;
+        }
+
+        public write(data: String): void throws Exception {
+            int offset = 0;
+            while (offset < data.length()) {
+                String part = data.substring(offset, data.length() - offset);
+                int result = syscalls::write(self.fd, part, part.length());
+                if (result <= 0) {
+                    throw new Exception(ExceptionKind.Io, result, "socket write failed");
+                }
+                offset = offset + result;
+            }
+        }
+
+        public readAll(): String throws Exception {
+            String result = new String();
+            while (true) {
+                String chunk = self.read(4096);
+                if (chunk.isEmpty()) break;
+                result.append(chunk);
+            }
+            return result;
+        }
+
+        public close(): void {
+            if (!self.closed) {
+                syscalls::close(self.fd);
+                self.closed = true;
+            }
+        }
+
+        public ~TcpConnection() {
+            self.close();
+        }
+    }
+
+    public connect(host: String, port: int): TcpConnection throws Exception {
+        Address address = new Address(host, port);
+        int fd = syscalls::socket(AF_INET(), SOCK_STREAM(), 0);
+        if (fd < 0) {
+            throw new Exception(ExceptionKind.Io, fd, "socket failed");
+        }
+        int result = syscalls::connect(fd, address.sockaddr(), 16);
+        if (result != 0) {
+            syscalls::close(fd);
+            throw new Exception(ExceptionKind.Io, result, "connect failed");
+        }
+        return new TcpConnection(fd);
+    }
+
+    public class TcpListener {
+        private fd: int;
+        private closed: bool;
+
+        public TcpListener() {
+            self.fd = -1;
+            self.closed = true;
+        }
+
+        public bind(host: String, port: int): void throws Exception {
+            Address address = new Address(host, port);
+            self.fd = syscalls::socket(AF_INET(), SOCK_STREAM(), 0);
+            if (self.fd < 0) {
+                throw new Exception(ExceptionKind.Io, self.fd, "socket failed");
+            }
+            int result = syscalls::bind(self.fd, address.sockaddr(), 16);
+            if (result != 0) {
+                syscalls::close(self.fd);
+                self.fd = -1;
+                throw new Exception(ExceptionKind.Io, result, "bind failed");
+            }
+            result = syscalls::listen(self.fd, 128);
+            if (result != 0) {
+                syscalls::close(self.fd);
+                self.fd = -1;
+                throw new Exception(ExceptionKind.Io, result, "listen failed");
+            }
+            self.closed = false;
+        }
+
+        public accept(): TcpConnection throws Exception {
+            if (self.closed) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "listener is closed");
+            }
+            String address = new String();
+            address.reserve(16);
+            String length = new String();
+            int i = 0;
+            while (i < 4) { length.appendByte(0 as char); i = i + 1; }
+            length.setByte(0, 16 as char);
+            int fd = syscalls::accept(self.fd, address, length);
+            if (fd < 0) {
+                throw new Exception(ExceptionKind.Io, fd, "accept failed");
+            }
+            return new TcpConnection(fd);
+        }
+
+        public close(): void {
+            if (!self.closed) {
+                syscalls::close(self.fd);
+                self.closed = true;
+            }
+        }
+
+        public ~TcpListener() {
+            self.close();
+        }
+    }
+}

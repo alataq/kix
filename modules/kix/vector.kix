@@ -1,0 +1,90 @@
+namespace vector {
+    // Vector<T> is a growable typed array. Storage starts at 64 elements,
+    // doubles when full, and grows by allocating a fresh T[cap] array, copying
+    // the old elements, and letting the assignment release the old allocation.
+    public class Vector<T> {
+        private data: T[];
+        private count: int;
+        private cap: int;
+        private owned: bool;
+
+        public Vector() {
+            self.count = 0;
+            self.cap = 0;
+            self.owned = false;
+            self.reserve(64);
+        }
+
+        public length(): int {
+            return self.count;
+        }
+
+        public capacity(): int {
+            return self.cap;
+        }
+
+        public isEmpty(): bool {
+            return self.count == 0;
+        }
+
+        public storage(): T[] {
+            return self.data;
+        }
+
+        public reserve(needed: int): void {
+            if (needed < 1) {
+                needed = 1;
+            }
+            if (self.owned && needed <= self.cap) {
+                return;
+            }
+
+            int next = self.cap;
+            if (next < 64) {
+                next = 64;
+            }
+            while (next < needed) {
+                next = next * 2;
+            }
+
+            T[] fresh = T[next];
+            int limit = self.count < self.cap ? self.count : self.cap;
+            int i = 0;
+            while (i < limit) {
+                fresh[i] = self.data[i];
+                i = i + 1;
+            }
+
+            self.data = fresh;
+            self.cap = next;
+            self.owned = true;
+        }
+
+        public push(value: T): void {
+            self.reserve(self.count + 1);
+            self.data[self.count] = value;
+            self.count = self.count + 1;
+        }
+
+        public pop(): T {
+            self.count = self.count - 1;
+            return self.at(self.count);
+        }
+
+        public at(index: int): T {
+            return self.data[index];
+        }
+
+        public set(index: int, value: T): void {
+            self.reserve(index + 1);
+            self.data[index] = value;
+            if (index >= self.count) {
+                self.count = index + 1;
+            }
+        }
+
+        public clear(): void {
+            self.count = 0;
+        }
+    }
+}

@@ -1,0 +1,170 @@
+import kix.string;
+import kix.util.bytes;
+import kix.security.hash;
+import kix.fs;
+import kix.process;
+import kix.util.tmp;
+import kix.error.exceptions;
+
+namespace compress {
+    private byteAt(data: String, index: int): int {
+        int value = data.byteAt(index);
+        if (value < 0) value = value + 256;
+        return value;
+    }
+
+    private stored(result: Bytes, data: String): void {
+        if (data.length() == 0) {
+            result.appendByte(1);
+            result.appendByte(0); result.appendByte(0);
+            result.appendByte(255); result.appendByte(255);
+            return;
+        }
+        int offset = 0;
+        while (offset < data.length()) {
+            int remaining = data.length() - offset;
+            int length = remaining;
+            if (length > 65535) length = 65535;
+            bool final = offset + length >= data.length();
+            int header = 0;
+            if (final) header = 1;
+            result.appendByte(header);
+            result.appendByte(length % 256);
+            result.appendByte((length / 256) % 256);
+            int inverse = (length ^ 65535) & 65535;
+            result.appendByte(inverse % 256);
+            result.appendByte((inverse / 256) % 256);
+            int i = 0;
+            while (i < length) {
+                result.appendByte(byteAt(data, offset + i));
+                i = i + 1;
+            }
+            offset = offset + length;
+        }
+    }
+
+    private inflate(data: String): String throws Exception {
+        String result = new String();
+        int index = 0;
+        while (true) {
+            if (index >= data.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated deflate stream");
+            }
+            int header = byteAt(data, index);
+            index = index + 1;
+            bool final = (header & 1) != 0;
+            int type = (header >> 1) & 3;
+            if (type != 0) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "only stored deflate blocks are supported");
+            }
+            if (index + 4 > data.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated deflate block");
+            }
+            int length = byteAt(data, index) + byteAt(data, index + 1) * 256;
+            index = index + 4;
+            if (index + length > data.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated deflate data");
+            }
+            int i = 0;
+            while (i < length) {
+                result.appendByte(byteAt(data, index + i) as char);
+                i = i + 1;
+            }
+            index = index + length;
+            if (final) break;
+        }
+        return result;
+    }
+
+    private adler32(data: String): int {
+        int a = 1;
+        int b = 0;
+        int i = 0;
+        while (i < data.length()) {
+            a = (a + byteAt(data, i)) % 65521;
+            b = (b + a) % 65521;
+            i = i + 1;
+        }
+        return (b * 65536 + a) & 4294967295;
+    }
+
+    private external(data: String, command: String): String throws Exception {
+        String inputPath = tmp::file("kix-compress-in-");
+        String outputPath = tmp::file("kix-compress-out-");
+        fs::writeFile(inputPath, data);
+        String full = command.concat(" < ");
+        full.append(inputPath);
+        full.append(" > ");
+        full.append(outputPath);
+        int status = process::run(full);
+        if (status != 0) {
+            fs::remove(inputPath);
+            fs::remove(outputPath);
+            throw new Exception(ExceptionKind.Io, status, "external compression command failed");
+        }
+        String result = fs::readFile(outputPath);
+        fs::remove(inputPath);
+        fs::remove(outputPath);
+        return result;
+    }
+
+    public gzipCompress(data: String): String throws Exception {
+        return external(data, "gzip -9 -c");
+    }
+
+    public gzipDecompress(data: String): String throws Exception {
+        return external(data, "gzip -d -c");
+    }
+
+    public zlibCompress(data: String): String throws Exception {
+        return external(data, "openssl zlib");
+    }
+
+    public zlibDecompress(data: String): String throws Exception {
+        return external(data, "openssl zlib -d");
+    }
+
+    private gzipCompressStored(data: String): String {
+        Bytes result = new Bytes();
+        result.appendByte(31); result.appendByte(139);
+        result.appendByte(8); result.appendByte(0);
+        result.appendByte(0); result.appendByte(0); result.appendByte(0); result.appendByte(0);
+        result.appendByte(0); result.appendByte(255);
+        stored(result, data);
+        int crc = hash::crc32(data);
+        result.writeU32LE(result.length(), crc);
+        result.writeU32LE(result.length(), data.length() & 4294967295);
+        return result.raw();
+    }
+
+    private gzipDecompressStored(data: String): String throws Exception {
+        if (data.length() < 18 || byteAt(data, 0) != 31 || byteAt(data, 1) != 139) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid gzip data");
+        }
+        int index = 10;
+        int flags = byteAt(data, 3);
+        if ((flags & 4) != 0) {
+            int extra = byteAt(data, index) + byteAt(data, index + 1) * 256;
+            index = index + 2 + extra;
+        }
+        if ((flags & 8) != 0) { while (index < data.length() && byteAt(data, index) != 0) index = index + 1; index = index + 1; }
+        if ((flags & 16) != 0) { while (index < data.length() && byteAt(data, index) != 0) index = index + 1; index = index + 1; }
+        if ((flags & 2) != 0) index = index + 2;
+        return inflate(data.substring(index, data.length() - index - 8));
+    }
+
+    private zlibCompressStored(data: String): String {
+        Bytes result = new Bytes();
+        result.appendByte(120); result.appendByte(1);
+        stored(result, data);
+        result.writeU32BE(result.length(), adler32(data));
+        return result.raw();
+    }
+
+    private zlibDecompressStored(data: String): String throws Exception {
+        if (data.length() < 6) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid zlib data");
+        }
+        return inflate(data.substring(2, data.length() - 6));
+    }
+}

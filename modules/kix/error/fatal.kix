@@ -1,0 +1,16 @@
+import kix.string;
+import kix.syscalls;
+
+namespace error.fatal {
+    public panic(message: String): void {
+        syscalls::write(2, message, message.length());
+        syscalls::write(2, "\n", 1);
+        syscalls::exit(1);
+    }
+
+    public assert(condition: bool, message: String): void {
+        if (!condition) {
+            panic(message);
+        }
+    }
+}

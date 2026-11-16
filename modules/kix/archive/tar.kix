@@ -1,0 +1,329 @@
+import kix.string;
+import kix.vector;
+import kix.util.bytes;
+import kix.util.path;
+import kix.util.text;
+import kix.fs;
+import kix.compress;
+import kix.error.exceptions;
+
+namespace archive.tar {
+    public class Entry {
+        public name: String;
+        public typeflag: char;
+        public data: String;
+        public linkname: String;
+        public mode: int;
+        public mtime: int;
+
+        public Entry(name: String, typeflag: char, data: String) {
+            self.name = name;
+            self.typeflag = typeflag;
+            self.data = data;
+            self.linkname = new String();
+            self.mode = 420;
+            self.mtime = 0;
+            if (typeflag == '5') self.mode = 493;
+        }
+
+        public setLink(target: String): void {
+            self.linkname = target;
+        }
+
+        public setMode(mode: int): void {
+            self.mode = mode;
+        }
+
+        public setMtime(value: int): void {
+            self.mtime = value;
+        }
+    }
+
+    public file(name: String, data: String): Entry {
+        return new Entry(name, '0', data);
+    }
+
+    public directory(name: String): Entry {
+        return new Entry(name, '5', new String());
+    }
+
+    public symlink(name: String, target: String): Entry {
+        Entry result = new Entry(name, '2', new String());
+        result.setLink(target);
+        return result;
+    }
+
+    private blank(): Bytes {
+        Bytes result = new Bytes();
+        int i = 0;
+        while (i < 512) { result.appendByte(0); i = i + 1; }
+        return result;
+    }
+
+    private byteValue(value: char): int {
+        int result = value;
+        if (result < 0) result = result + 256;
+        return result;
+    }
+
+    private writeText(buffer: Bytes, offset: int, length: int, value: String): void {
+        int i = 0;
+        while (i < length) {
+            int byteValueOut = 0;
+            if (i < value.length()) byteValueOut = byteValue(value.byteAt(i));
+            buffer.setByte(offset + i, byteValueOut);
+            i = i + 1;
+        }
+    }
+
+    private writeOctal(buffer: Bytes, offset: int, length: int, value: int): void {
+        int i = 0;
+        while (i < length - 1) {
+            buffer.setByte(offset + i, 48);
+            i = i + 1;
+        }
+        buffer.setByte(offset + length - 1, 0);
+        int position = offset + length - 2;
+        int number = value;
+        if (number < 0) number = 0;
+        while (number > 0 && position >= offset) {
+            buffer.setByte(position, 48 + (number % 8));
+            number = number / 8;
+            position = position - 1;
+        }
+    }
+
+    private header(entry: Entry): Bytes throws Exception {
+        Bytes result = blank();
+        String name = entry.name;
+        String prefix = new String();
+        if (name.length() > 100) {
+            int slash = -1;
+            int i = 0;
+            while (i < name.length()) {
+                if (name.byteAt(i) == '/') slash = i;
+                i = i + 1;
+            }
+            if (slash <= 0) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "tar path too long");
+            }
+            prefix = name.substring(0, slash);
+            name = name.substring(slash + 1, name.length() - slash - 1);
+            if (name.length() > 100 || prefix.length() > 155) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "tar path too long");
+            }
+        }
+        writeText(result, 0, 100, name);
+        writeOctal(result, 100, 8, entry.mode);
+        writeOctal(result, 108, 8, 0);
+        writeOctal(result, 116, 8, 0);
+        writeOctal(result, 124, 12, entry.data.length());
+        writeOctal(result, 136, 12, entry.mtime);
+        int i = 148;
+        while (i < 156) { result.setByte(i, 32); i = i + 1; }
+        result.setByte(156, byteValue(entry.typeflag));
+        writeText(result, 157, 100, entry.linkname);
+        writeText(result, 257, 6, "ustar");
+        writeText(result, 263, 2, "00");
+        writeText(result, 345, 155, prefix);
+        int checksum = 0;
+        i = 0;
+        while (i < 512) {
+            checksum = checksum + result.byteAt(i);
+            i = i + 1;
+        }
+        String checksumText = text::padLeft(intToOctal(checksum), 6, '0');
+        writeText(result, 148, 6, checksumText);
+        result.setByte(154, 0);
+        result.setByte(155, 32);
+        return result;
+    }
+
+    private intToOctal(value: int): String {
+        if (value == 0) return "0";
+        String digits = new String();
+        int number = value;
+        while (number > 0) {
+            digits.appendByte((48 + (number % 8)) as char);
+            number = number / 8;
+        }
+        String result = new String();
+        int i = digits.length() - 1;
+        while (i >= 0) {
+            result.appendByte(digits.byteAt(i));
+            i = i - 1;
+        }
+        return result;
+    }
+
+    private zeroPadding(result: Bytes, count: int): void {
+        int i = 0;
+        while (i < count) { result.appendByte(0); i = i + 1; }
+    }
+
+    public create(entries: Vector<Entry>): String throws Exception {
+        Bytes result = new Bytes();
+        int i = 0;
+        while (i < entries.length()) {
+            Entry entry = entries.at(i);
+            result.appendBytes(header(entry));
+            result.appendString(entry.data);
+            int padding = (512 - (entry.data.length() % 512)) % 512;
+            zeroPadding(result, padding);
+            i = i + 1;
+        }
+        zeroPadding(result, 1024);
+        return result.raw();
+    }
+
+    private octalValue(buffer: Bytes, offset: int, length: int): int {
+        int result = 0;
+        int i = 0;
+        while (i < length) {
+            int value = buffer.byteAt(offset + i);
+            if (value == 0 || value == 32) {
+                i = i + 1;
+                continue;
+            }
+            if (value < 48 || value > 55) break;
+            result = result * 8 + (value - 48);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    private readText(buffer: Bytes, offset: int, length: int): String {
+        String result = new String();
+        int i = 0;
+        while (i < length) {
+            int value = buffer.byteAt(offset + i);
+            if (value == 0) break;
+            result.appendByte(value as char);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    private isZeroBlock(buffer: Bytes, offset: int): bool {
+        int i = 0;
+        while (i < 512) {
+            if (buffer.byteAt(offset + i) != 0) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+
+    public parse(data: String): Vector<Entry> throws Exception {
+        Bytes buffer = new Bytes(data);
+        Vector<Entry> result = new Vector<Entry>();
+        int offset = 0;
+        while (offset + 512 <= data.length()) {
+            if (isZeroBlock(buffer, offset)) break;
+            String name = readText(buffer, 0 + offset, 100);
+            String prefix = readText(buffer, 345 + offset, 155);
+            if (!prefix.isEmpty()) {
+                String combined = prefix.concat("/");
+                combined.append(name);
+                name = combined;
+            }
+            int mode = octalValue(buffer, offset + 100, 8);
+            int size = octalValue(buffer, offset + 124, 12);
+            int mtime = octalValue(buffer, offset + 136, 12);
+            char typeflag = buffer.byteAt(offset + 156) as char;
+            String linkname = readText(buffer, offset + 157, 100);
+            int dataOffset = offset + 512;
+            if (dataOffset + size > data.length()) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated tar entry");
+            }
+            Entry entry = new Entry(name, typeflag, data.substring(dataOffset, size));
+            entry.setMode(mode);
+            entry.setMtime(mtime);
+            if (!linkname.isEmpty()) entry.setLink(linkname);
+            result.push(entry);
+            int padding = (512 - (size % 512)) % 512;
+            offset = dataOffset + size + padding;
+        }
+        return result;
+    }
+
+    public createGzip(entries: Vector<Entry>): String throws Exception {
+        return compress::gzipCompress(create(entries));
+    }
+
+    public parseGzip(data: String): Vector<Entry> throws Exception {
+        return parse(compress::gzipDecompress(data));
+    }
+
+    private addDirectory(entries: Vector<Entry>, physical: String, relative: String): void throws Exception {
+        Stat info = fs::lstat(physical);
+        if (info.error() != 0) {
+            throw new Exception(ExceptionKind.NotFound, -2, "archive path not found");
+        }
+        String name = relative;
+        if (info.isDirectory()) {
+            if (!name.isEmpty() && name.byteAt(name.length() - 1) != '/') name = name.concat("/");
+            Entry directoryEntry = directory(name);
+            directoryEntry.setMode(info.permissions());
+            directoryEntry.setMtime(info.modified());
+            entries.push(directoryEntry);
+            Vector<String> names = fs::list(physical);
+            int i = 0;
+            while (i < names.length()) {
+                String child = names.at(i);
+                addDirectory(entries, path::join(physical, child), path::join(relative, child));
+                i = i + 1;
+            }
+            return;
+        }
+        if (info.isSymlink()) {
+            Entry linkEntry = symlink(relative, fs::readSymlink(physical));
+            linkEntry.setMode(info.permissions());
+            linkEntry.setMtime(info.modified());
+            entries.push(linkEntry);
+            return;
+        }
+        if (info.isFile()) {
+            Entry fileEntry = file(relative, fs::readFile(physical));
+            fileEntry.setMode(info.permissions());
+            fileEntry.setMtime(info.modified());
+            entries.push(fileEntry);
+            return;
+        }
+        throw new Exception(ExceptionKind.InvalidArgument, -22, "unsupported archive file type");
+    }
+
+    public createFromDirectory(rootName: String, physical: String): Vector<Entry> throws Exception {
+        Vector<Entry> entries = new Vector<Entry>();
+        addDirectory(entries, physical, rootName);
+        return entries;
+    }
+
+    public extract(entries: Vector<Entry>, targetRoot: String) throws Exception {
+        fs::mkdirAll(targetRoot);
+        int i = 0;
+        while (i < entries.length()) {
+            Entry entry = entries.at(i);
+            String name = path::normalize(entry.name);
+            if (path::isAbsolute(name) || name.equals("..") || text::startsWith(name, "../")) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "unsafe tar path");
+            }
+            String target = path::join(targetRoot, name);
+            if (entry.typeflag == '5') {
+                fs::mkdirAll(target);
+                fs::chmod(target, entry.mode);
+            } else if (entry.typeflag == '2') {
+                fs::mkdirAll(path::dirname(target));
+                fs::createSymlink(entry.linkname, target);
+            } else if (entry.typeflag == '0' || entry.typeflag == 0 as char) {
+                fs::mkdirAll(path::dirname(target));
+                fs::writeFile(target, entry.data);
+                fs::chmod(target, entry.mode);
+            }
+            i = i + 1;
+        }
+    }
+
+    public extractGzip(data: String, targetRoot: String): void throws Exception {
+        extract(parseGzip(data), targetRoot);
+    }
+}

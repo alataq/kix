@@ -1,0 +1,142 @@
+import kix.string;
+
+namespace bytes {
+    private byteValue(value: char): int {
+        int result = value;
+        if (result < 0) result = result + 256;
+        return result;
+    }
+
+    public class Bytes {
+        private data: String;
+
+        public Bytes() {
+            self.data = new String();
+        }
+
+        public Bytes(value: String) {
+            self.data = new String(value);
+        }
+
+        public raw(): String {
+            return self.data;
+        }
+
+        public length(): int {
+            return self.data.length();
+        }
+
+        public capacity(): int {
+            return self.data.capacity();
+        }
+
+        public isEmpty(): bool {
+            return self.data.isEmpty();
+        }
+
+        public reserve(needed: int): void {
+            self.data.reserve(needed);
+        }
+
+        public clear(): void {
+            self.data.clear();
+        }
+
+        public byteAt(index: int): int {
+            return byteValue(self.data.byteAt(index));
+        }
+
+        public setByte(index: int, value: int): void {
+            self.data.setByte(index, value as char);
+        }
+
+        public appendByte(value: int): void {
+            self.data.appendByte(value as char);
+        }
+
+        public appendString(value: String): void {
+            self.data.append(value);
+        }
+
+        public appendBytes(value: Bytes): void {
+            self.data.append(value.raw());
+        }
+
+        public slice(start: int, length: int): Bytes {
+            Bytes result = new Bytes();
+            int i = 0;
+            while (i < length) {
+                result.appendByte(self.byteAt(start + i));
+                i = i + 1;
+            }
+            return result;
+        }
+
+        public copy(): Bytes {
+            return new Bytes(self.data);
+        }
+
+        public readU16LE(offset: int): int {
+            return self.byteAt(offset) + self.byteAt(offset + 1) * 256;
+        }
+
+        public readU16BE(offset: int): int {
+            return self.byteAt(offset) * 256 + self.byteAt(offset + 1);
+        }
+
+        public readU32LE(offset: int): int {
+            int result = self.byteAt(offset);
+            result = result + self.byteAt(offset + 1) * 256;
+            result = result + self.byteAt(offset + 2) * 65536;
+            result = result + self.byteAt(offset + 3) * 16777216;
+            return result;
+        }
+
+        public readU32BE(offset: int): int {
+            int result = self.byteAt(offset);
+            result = result * 256 + self.byteAt(offset + 1);
+            result = result * 256 + self.byteAt(offset + 2);
+            result = result * 256 + self.byteAt(offset + 3);
+            return result;
+        }
+
+        public readU64LE(offset: int): int {
+            int low = self.readU32LE(offset);
+            int high = self.readU32LE(offset + 4);
+            return low + high * 4294967296;
+        }
+
+        public writeU16LE(offset: int, value: int): void {
+            self.setByte(offset, value % 256);
+            self.setByte(offset + 1, (value / 256) % 256);
+        }
+
+        public writeU16BE(offset: int, value: int): void {
+            self.setByte(offset, (value / 256) % 256);
+            self.setByte(offset + 1, value % 256);
+        }
+
+        public writeU32LE(offset: int, value: int): void {
+            self.setByte(offset, value % 256);
+            self.setByte(offset + 1, (value / 256) % 256);
+            self.setByte(offset + 2, (value / 65536) % 256);
+            self.setByte(offset + 3, (value / 16777216) % 256);
+        }
+
+        public writeU32BE(offset: int, value: int): void {
+            self.setByte(offset, (value / 16777216) % 256);
+            self.setByte(offset + 1, (value / 65536) % 256);
+            self.setByte(offset + 2, (value / 256) % 256);
+            self.setByte(offset + 3, value % 256);
+        }
+
+        public writeU64LE(offset: int, value: int): void {
+            self.writeU32LE(offset, value % 4294967296);
+            self.writeU32LE(offset + 4, value / 4294967296);
+        }
+
+        public equals(other: Bytes): bool {
+            return self.data.equals(other.raw());
+        }
+    }
+}

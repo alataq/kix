@@ -1,0 +1,163 @@
+import kix.string;
+import kix.vector;
+import kix.util.text;
+import kix.fs;
+import kix.util.bytes;
+import kix.util.random;
+import kix.net.udp;
+import kix.net.poll;
+import kix.error.exceptions;
+
+namespace net.dns {
+    public isIPv4(value: String): bool {
+        Vector<String> parts = text::split(value, ".");
+        if (parts.length() != 4) return false;
+        int i = 0;
+        while (i < 4) {
+            int number = text::parseIntOr(parts.at(i), -1);
+            if (number < 0 || number > 255) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+
+    public lookup(host: String): String throws Exception {
+        if (isIPv4(host)) return host;
+        String text = fs::readFile("/etc/hosts");
+        Vector<String> lines = text::split(text, "\n");
+        int i = 0;
+        while (i < lines.length()) {
+            String line = lines.at(i);
+            int comment = text::indexOf(line, "#");
+            if (comment >= 0) line = line.substring(0, comment);
+            Vector<String> fields = text::split(text::trim(line), " ");
+            Vector<String> parts = new Vector<String>();
+            int j = 0;
+            while (j < fields.length()) {
+                String field = fields.at(j);
+                if (!field.isEmpty()) parts.push(field);
+                j = j + 1;
+            }
+            if (parts.length() >= 2) {
+                j = 1;
+                while (j < parts.length()) {
+                    String candidate = parts.at(j);
+                    if (candidate.equals(host)) return parts.at(0);
+                    j = j + 1;
+                }
+            }
+            i = i + 1;
+        }
+        throw new Exception(ExceptionKind.NotFound, -2, "host not found");
+    }
+
+    private nameserver(): String throws Exception {
+        String text = fs::readFile("/etc/resolv.conf");
+        Vector<String> lines = text::split(text, "\n");
+        int i = 0;
+        while (i < lines.length()) {
+            String line = text::trim(lines.at(i));
+            if (text::startsWith(line, "nameserver")) {
+                Vector<String> fields = text::split(line, " ");
+                int j = 0;
+                while (j < fields.length()) {
+                    String field = fields.at(j);
+                    if (isIPv4(field)) return field;
+                    j = j + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return "127.0.0.1";
+    }
+
+    private skipName(data: Bytes, offset: int): int throws Exception {
+        int index = offset;
+        while (index < data.length()) {
+            int length = data.byteAt(index);
+            if (length == 0) return index + 1;
+            if ((length & 192) == 192) return index + 2;
+            index = index + 1 + length;
+        }
+        throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid DNS name");
+    }
+
+    public resolve(host: String): String throws Exception {
+        if (isIPv4(host)) return host;
+        try {
+            return lookup(host);
+        } catch (error: Exception) {
+        }
+
+        Bytes query = new Bytes();
+        int i = 0;
+        while (i < 12) { query.appendByte(0); i = i + 1; }
+        int id = random::intBelow(65535);
+        query.writeU16BE(0, id);
+        query.writeU16BE(2, 256);
+        query.writeU16BE(4, 1);
+        Vector<String> labels = text::split(host, ".");
+        i = 0;
+        while (i < labels.length()) {
+            String label = labels.at(i);
+            if (label.length() > 63) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "DNS label too long");
+            }
+            query.appendByte(label.length());
+            int j = 0;
+            while (j < label.length()) {
+                query.appendByte(label.byteAt(j));
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        query.appendByte(0);
+        query.writeU16BE(query.length(), 1);
+        query.writeU16BE(query.length(), 1);
+
+        udp::Socket socket = new udp::Socket();
+        socket.bind("0.0.0.0", 0);
+        socket.send(query.raw(), nameserver(), 53);
+        poll::Poller poller = new poll::Poller();
+        poller.add(socket.descriptor(), 1);
+        Vector<poll::Event> events = poller.wait(1, 2000);
+        if (events.isEmpty()) {
+            poller.close();
+            socket.close();
+            throw new Exception(ExceptionKind.Io, -110, "DNS request timed out");
+        }
+        udp::Datagram datagram = socket.receive(4096);
+        poller.close();
+        socket.close();
+
+        Bytes response = new Bytes(datagram.data);
+        if (response.length() < 12 || response.readU16BE(0) != id) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid DNS response");
+        }
+        int answers = response.readU16BE(6);
+        int offset = 12;
+        offset = skipName(response, offset);
+        offset = offset + 4;
+        i = 0;
+        while (i < answers) {
+            offset = skipName(response, offset);
+            if (offset + 10 > response.length()) break;
+            int type = response.readU16BE(offset);
+            int length = response.readU16BE(offset + 8);
+            offset = offset + 10;
+            if (type == 1 && length == 4) {
+                String ip = text::intToString(response.byteAt(offset));
+                ip.append(".");
+                ip.append(text::intToString(response.byteAt(offset + 1)));
+                ip.append(".");
+                ip.append(text::intToString(response.byteAt(offset + 2)));
+                ip.append(".");
+                ip.append(text::intToString(response.byteAt(offset + 3)));
+                return ip;
+            }
+            offset = offset + length;
+            i = i + 1;
+        }
+        throw new Exception(ExceptionKind.NotFound, -2, "DNS address not found");
+    }
+}

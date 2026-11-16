@@ -1,0 +1,5 @@
+{
+  "name": "tasks",
+  "entry": "src/main.kix",
+  "output": "bin/tasks"
+}

@@ -1,0 +1,283 @@
+import kix.string;
+import kix.vector;
+import kix.error.exceptions;
+
+namespace collections {
+    public class List<T> {
+        private data: Vector<T>;
+
+        public List() { self.data = new Vector<T>(); }
+        public length(): int { return self.data.length(); }
+        public isEmpty(): bool { return self.data.isEmpty(); }
+        public capacity(): int { return self.data.capacity(); }
+        public add(value: T): void { self.data.push(value); }
+        public get(index: int): T { return self.data.at(index); }
+        public set(index: int, value: T): void { self.data.set(index, value); }
+        public clear(): void { self.data.clear(); }
+
+        public removeAt(index: int): T {
+            T value = self.data.at(index);
+            int i = index;
+            while (i + 1 < self.data.length()) {
+                self.data.set(i, self.data.at(i + 1));
+                i = i + 1;
+            }
+            self.data.pop();
+            return value;
+        }
+
+        public toVector(): Vector<T> {
+            Vector<T> result = new Vector<T>();
+            int i = 0;
+            while (i < self.data.length()) {
+                result.push(self.data.at(i));
+                i = i + 1;
+            }
+            return result;
+        }
+    }
+
+    public class StringMap<V> {
+        private keyData: Vector<String>;
+        private valueData: Vector<V>;
+        private usedData: Vector<bool>;
+        private countValue: int;
+
+        public StringMap() {
+            self.keyData = new Vector<String>();
+            self.valueData = new Vector<V>();
+            self.usedData = new Vector<bool>();
+            self.countValue = 0;
+        }
+
+        private find(key: String): int {
+            int i = 0;
+            while (i < self.keyData.length()) {
+                if (self.usedData.at(i)) {
+                    String current = self.keyData.at(i);
+                    if (current.equals(key)) return i;
+                }
+                i = i + 1;
+            }
+            return -1;
+        }
+
+        public put(key: String, value: V): void {
+            int index = self.find(key);
+            if (index >= 0) { self.valueData.set(index, value); return; }
+            self.keyData.push(key);
+            self.valueData.push(value);
+            self.usedData.push(true);
+            self.countValue = self.countValue + 1;
+        }
+
+        public contains(key: String): bool { return self.find(key) >= 0; }
+
+        public get(key: String): V throws Exception {
+            int index = self.find(key);
+            if (index < 0) throw new Exception(ExceptionKind.NotFound, -2, "key not found");
+            return self.valueData.at(index);
+        }
+
+        public getOr(key: String, fallback: V): V {
+            int index = self.find(key);
+            if (index < 0) return fallback;
+            return self.valueData.at(index);
+        }
+
+        public remove(key: String): bool {
+            int index = self.find(key);
+            if (index < 0) return false;
+            int last = self.keyData.length() - 1;
+            if (index != last) {
+                self.keyData.set(index, self.keyData.at(last));
+                self.valueData.set(index, self.valueData.at(last));
+                self.usedData.set(index, self.usedData.at(last));
+            }
+            self.keyData.pop();
+            self.valueData.pop();
+            self.usedData.pop();
+            self.countValue = self.countValue - 1;
+            return true;
+        }
+
+        public length(): int { return self.countValue; }
+        public isEmpty(): bool { return self.countValue == 0; }
+
+        public keys(): Vector<String> {
+            Vector<String> result = new Vector<String>();
+            int i = 0;
+            while (i < self.keyData.length()) { result.push(self.keyData.at(i)); i = i + 1; }
+            return result;
+        }
+
+        public values(): Vector<V> {
+            Vector<V> result = new Vector<V>();
+            int i = 0;
+            while (i < self.valueData.length()) { result.push(self.valueData.at(i)); i = i + 1; }
+            return result;
+        }
+
+        public clear(): void {
+            self.keyData.clear();
+            self.valueData.clear();
+            self.usedData.clear();
+            self.countValue = 0;
+        }
+    }
+
+    public class IntMap<V> {
+        private keyData: Vector<int>;
+        private valueData: Vector<V>;
+        private usedData: Vector<bool>;
+        private countValue: int;
+
+        public IntMap() {
+            self.keyData = new Vector<int>();
+            self.valueData = new Vector<V>();
+            self.usedData = new Vector<bool>();
+            self.countValue = 0;
+        }
+
+        private find(key: int): int {
+            int i = 0;
+            while (i < self.keyData.length()) {
+                if (self.usedData.at(i) && self.keyData.at(i) == key) return i;
+                i = i + 1;
+            }
+            return -1;
+        }
+
+        public put(key: int, value: V): void {
+            int index = self.find(key);
+            if (index >= 0) { self.valueData.set(index, value); return; }
+            self.keyData.push(key);
+            self.valueData.push(value);
+            self.usedData.push(true);
+            self.countValue = self.countValue + 1;
+        }
+
+        public contains(key: int): bool { return self.find(key) >= 0; }
+
+        public get(key: int): V throws Exception {
+            int index = self.find(key);
+            if (index < 0) throw new Exception(ExceptionKind.NotFound, -2, "key not found");
+            return self.valueData.at(index);
+        }
+
+        public getOr(key: int, fallback: V): V {
+            int index = self.find(key);
+            if (index < 0) return fallback;
+            return self.valueData.at(index);
+        }
+
+        public remove(key: int): bool {
+            int index = self.find(key);
+            if (index < 0) return false;
+            int last = self.keyData.length() - 1;
+            if (index != last) {
+                self.keyData.set(index, self.keyData.at(last));
+                self.valueData.set(index, self.valueData.at(last));
+                self.usedData.set(index, self.usedData.at(last));
+            }
+            self.keyData.pop();
+            self.valueData.pop();
+            self.usedData.pop();
+            self.countValue = self.countValue - 1;
+            return true;
+        }
+
+        public length(): int { return self.countValue; }
+        public isEmpty(): bool { return self.countValue == 0; }
+
+        public keys(): Vector<int> {
+            Vector<int> result = new Vector<int>();
+            int i = 0;
+            while (i < self.keyData.length()) { result.push(self.keyData.at(i)); i = i + 1; }
+            return result;
+        }
+
+        public values(): Vector<V> {
+            Vector<V> result = new Vector<V>();
+            int i = 0;
+            while (i < self.valueData.length()) { result.push(self.valueData.at(i)); i = i + 1; }
+            return result;
+        }
+
+        public clear(): void {
+            self.keyData.clear();
+            self.valueData.clear();
+            self.usedData.clear();
+            self.countValue = 0;
+        }
+    }
+
+    public class StringSet {
+        private data: StringMap<bool>;
+        public StringSet() { self.data = new StringMap<bool>(); }
+        public add(value: String): void { self.data.put(value, true); }
+        public contains(value: String): bool { return self.data.contains(value); }
+        public remove(value: String): bool { return self.data.remove(value); }
+        public length(): int { return self.data.length(); }
+        public isEmpty(): bool { return self.data.isEmpty(); }
+        public values(): Vector<String> { return self.data.keys(); }
+    }
+
+    public class IntSet {
+        private data: IntMap<bool>;
+        public IntSet() { self.data = new IntMap<bool>(); }
+        public add(value: int): void { self.data.put(value, true); }
+        public contains(value: int): bool { return self.data.contains(value); }
+        public remove(value: int): bool { return self.data.remove(value); }
+        public length(): int { return self.data.length(); }
+        public isEmpty(): bool { return self.data.isEmpty(); }
+        public values(): Vector<int> { return self.data.keys(); }
+    }
+
+    public class IntHeap {
+        private data: Vector<int>;
+        public IntHeap() { self.data = new Vector<int>(); }
+        public length(): int { return self.data.length(); }
+        public isEmpty(): bool { return self.data.isEmpty(); }
+
+        public push(value: int): void {
+            self.data.push(value);
+            int index = self.data.length() - 1;
+            while (index > 0) {
+                int parent = (index - 1) / 2;
+                if (self.data.at(parent) <= self.data.at(index)) break;
+                int temporary = self.data.at(parent);
+                self.data.set(parent, self.data.at(index));
+                self.data.set(index, temporary);
+                index = parent;
+            }
+        }
+
+        public peek(): int throws Exception {
+            if (self.data.isEmpty()) throw new Exception(ExceptionKind.InvalidArgument, -22, "heap is empty");
+            return self.data.at(0);
+        }
+
+        public pop(): int throws Exception {
+            if (self.data.isEmpty()) throw new Exception(ExceptionKind.InvalidArgument, -22, "heap is empty");
+            int result = self.data.at(0);
+            int last = self.data.length() - 1;
+            self.data.set(0, self.data.at(last));
+            self.data.pop();
+            int index = 0;
+            while (true) {
+                int left = index * 2 + 1;
+                int right = left + 1;
+                int smallest = index;
+                if (left < self.data.length() && self.data.at(left) < self.data.at(smallest)) smallest = left;
+                if (right < self.data.length() && self.data.at(right) < self.data.at(smallest)) smallest = right;
+                if (smallest == index) break;
+                int temporary = self.data.at(smallest);
+                self.data.set(smallest, self.data.at(index));
+                self.data.set(index, temporary);
+                index = smallest;
+            }
+            return result;
+        }
+    }
+}

@@ -1,0 +1,15 @@
+import kix.string;
+
+namespace stream {
+    public interface Reader {
+        read(count: int): String;
+    }
+
+    public interface Writer {
+        write(data: String): void;
+    }
+
+    public interface Closer {
+        close(): void;
+    }
+}

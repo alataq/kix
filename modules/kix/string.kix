@@ -1,0 +1,142 @@
+import kix.vector;
+
+namespace string {
+    // String is a growable byte buffer backed by Vector<char>.
+    //
+    // String literals are non-owned views over static data. Vector reserve
+    // copies them into fresh storage on the first mutation (copy-on-write).
+    public class String {
+        private data: Vector<char>;
+
+        public String() {
+            self.data = new Vector<char>();
+        }
+
+        public String(value: char[]) {
+            self.data = new Vector<char>();
+            int i = 0;
+            while (value[i] != '\0') {
+                self.data.push(value[i]);
+                i = i + 1;
+            }
+            self.data.push('\0');
+            self.data.pop();
+        }
+
+        public String(value: String) {
+            self.data = new Vector<char>();
+            self.append(value);
+        }
+
+        public length(): int {
+            return self.data.length();
+        }
+
+        public capacity(): int {
+            return self.data.capacity();
+        }
+
+        public address(): char[] {
+            return self.data.storage();
+        }
+
+        public isEmpty(): bool {
+            return self.data.isEmpty();
+        }
+
+        public byteAt(index: int): char {
+            return self.data.at(index);
+        }
+
+        public charAt(index: int): char {
+            return self.data.at(index);
+        }
+
+        public reserve(needed: int): void {
+            self.data.reserve(needed);
+        }
+
+        public clear(): void {
+            self.data.clear();
+        }
+
+        public setByte(index: int, value: char): void {
+            self.reserve(index + 2);
+            while (self.data.length() <= index) {
+                self.data.push('\0');
+            }
+            self.data.set(index, value);
+            self.data.push('\0');
+            self.data.pop();
+        }
+
+        public setChar(index: int, value: char): void {
+            self.setByte(index, value);
+        }
+
+        public appendByte(value: char): void {
+            self.data.push(value);
+            self.data.push('\0');
+            self.data.pop();
+        }
+
+        public append(text: String): void {
+            int extra = text.length();
+            self.reserve(self.data.length() + extra + 2);
+
+            int i = 0;
+            while (i < extra) {
+                self.data.push(text.byteAt(i));
+                i = i + 1;
+            }
+
+            self.data.push('\0');
+            self.data.pop();
+        }
+
+        public equals(other: String): bool {
+            if (self.length() != other.length()) {
+                return false;
+            }
+            int i = 0;
+            while (i < self.length()) {
+                if (self.byteAt(i) != other.byteAt(i)) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return true;
+        }
+
+        public concat(other: String): String {
+            String result = new String();
+            result.append(self);
+            result.append(other);
+            return result;
+        }
+
+        public substring(start: int, len: int): String {
+            if (start < 0) {
+                start = 0;
+            }
+            if (len < 0) {
+                len = 0;
+            }
+            if (start > self.length()) {
+                start = self.length();
+            }
+            if (start + len > self.length()) {
+                len = self.length() - start;
+            }
+
+            String result = new String();
+            result.reserve(len + 2);
+            int i = 0;
+            while (i < len) {
+                result.appendByte(self.byteAt(start + i));
+                i = i + 1;
+            }
+            return result;
+        }
+    }
+}

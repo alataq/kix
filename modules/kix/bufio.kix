@@ -1,0 +1,145 @@
+import kix.string;
+import kix.stream;
+
+namespace bufio {
+    public class StringReader implements Reader {
+        private data: String;
+        private position: int;
+
+        public StringReader(data: String) {
+            self.data = data;
+            self.position = 0;
+        }
+
+        public read(count: int): String {
+            if (count <= 0 || self.position >= self.data.length()) {
+                return new String();
+            }
+            int remaining = self.data.length() - self.position;
+            int actual = count;
+            if (actual > remaining) actual = remaining;
+            String result = self.data.substring(self.position, actual);
+            self.position = self.position + actual;
+            return result;
+        }
+
+        public eof(): bool {
+            return self.position >= self.data.length();
+        }
+    }
+
+    public class StringWriter implements Writer {
+        private data: String;
+
+        public StringWriter() {
+            self.data = new String();
+        }
+
+        public write(data: String): void {
+            self.data.append(data);
+        }
+
+        public toString(): String {
+            return new String(self.data);
+        }
+
+        public length(): int {
+            return self.data.length();
+        }
+    }
+
+    public class BufferedReader {
+        private source: Reader;
+        private buffer: String;
+        private position: int;
+        private finished: bool;
+
+        public BufferedReader(source: Reader) {
+            self.source = source;
+            self.buffer = new String();
+            self.position = 0;
+            self.finished = false;
+        }
+
+        private fill(): void {
+            if (self.finished) return;
+            self.buffer = self.source.read(4096);
+            self.position = 0;
+            if (self.buffer.isEmpty()) self.finished = true;
+        }
+
+        public read(count: int): String {
+            String result = new String();
+            while (count > 0) {
+                if (self.position >= self.buffer.length()) {
+                    self.fill();
+                    if (self.finished) break;
+                }
+                int available = self.buffer.length() - self.position;
+                int actual = count;
+                if (actual > available) actual = available;
+                result.append(self.buffer.substring(self.position, actual));
+                self.position = self.position + actual;
+                count = count - actual;
+            }
+            return result;
+        }
+
+        public readLine(): String {
+            String result = new String();
+            while (true) {
+                if (self.position >= self.buffer.length()) {
+                    self.fill();
+                    if (self.finished) break;
+                }
+                char value = self.buffer.byteAt(self.position);
+                self.position = self.position + 1;
+                if (value == '\n') break;
+                if (value != '\r') result.appendByte(value);
+            }
+            return result;
+        }
+
+        public readAll(): String {
+            String result = new String();
+            while (true) {
+                String chunk = self.read(4096);
+                if (chunk.isEmpty()) break;
+                result.append(chunk);
+            }
+            return result;
+        }
+
+        public eof(): bool {
+            if (self.position < self.buffer.length()) return false;
+            self.fill();
+            return self.finished;
+        }
+    }
+
+    public class BufferedWriter {
+        private target: Writer;
+        private buffer: String;
+
+        public BufferedWriter(target: Writer) {
+            self.target = target;
+            self.buffer = new String();
+        }
+
+        public write(data: String): void {
+            self.buffer.append(data);
+            if (self.buffer.length() >= 4096) self.flush();
+        }
+
+        public flush(): void {
+            if (!self.buffer.isEmpty()) {
+                self.target.write(self.buffer);
+                self.buffer.clear();
+            }
+        }
+
+        public close(): void {
+            self.flush();
+        }
+    }
+}

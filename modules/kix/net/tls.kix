@@ -1,0 +1,98 @@
+import kix.string;
+import kix.util.text;
+import kix.fs;
+import kix.process;
+import kix.util.tmp;
+import kix.net.http;
+import kix.error.exceptions;
+
+namespace net.tls {
+    private validHost(host: String): bool {
+        int i = 0;
+        while (i < host.length()) {
+            int code = host.byteAt(i);
+            if (code < 0) code = code + 256;
+            bool okay =
+                (code >= 48 && code <= 57) ||
+                (code >= 65 && code <= 90) ||
+                (code >= 97 && code <= 122) ||
+                code == 45 || code == 46;
+            if (!okay) return false;
+            i = i + 1;
+        }
+        return !host.isEmpty();
+    }
+
+    private requestData(method: String, host: String, port: int, target: String, body: String): String {
+        String result = new String();
+        result.append(method);
+        result.append(" ");
+        result.append(target);
+        result.append(" HTTP/1.1\r\nHost: ");
+        result.append(host);
+        result.append(":");
+        result.append(text::intToString(port));
+        result.append("\r\nConnection: close\r\n");
+        if (!body.isEmpty()) {
+            result.append("Content-Length: ");
+            result.append(text::intToString(body.length()));
+            result.append("\r\n");
+        }
+        result.append("\r\n");
+        result.append(body);
+        return result;
+    }
+
+    private exchange(host: String, port: int, request: String): String throws Exception {
+        if (!validHost(host)) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid TLS host");
+        }
+        String inputPath = tmp::file("kix-tls-in-");
+        String outputPath = tmp::file("kix-tls-out-");
+        fs::writeFile(inputPath, request);
+        String command = "openssl s_client -quiet -connect ";
+        command.append(host);
+        command.append(":");
+        command.append(text::intToString(port));
+        command.append(" -servername ");
+        command.append(host);
+        command.append(" < ");
+        command.append(inputPath);
+        command.append(" > ");
+        command.append(outputPath);
+        command.append(" 2>/dev/null");
+        int status = process::run(command);
+        String result = fs::readFile(outputPath);
+        fs::remove(inputPath);
+        fs::remove(outputPath);
+        if (status != 0 || result.isEmpty()) {
+            throw new Exception(ExceptionKind.Io, status, "TLS exchange failed");
+        }
+        return result;
+    }
+
+    public get(host: String, port: int, target: String): http::Response throws Exception {
+        return http::parseResponse(exchange(host, port, requestData("GET", host, port, target, "")));
+    }
+
+    public get(host: String, target: String): http::Response throws Exception {
+        return get(host, 443, target);
+    }
+
+    public post(host: String, port: int, target: String, contentType: String, body: String): http::Response throws Exception {
+        String request = new String();
+        request.append("POST ");
+        request.append(target);
+        request.append(" HTTP/1.1\r\nHost: ");
+        request.append(host);
+        request.append(":");
+        request.append(text::intToString(port));
+        request.append("\r\nConnection: close\r\nContent-Type: ");
+        request.append(contentType);
+        request.append("\r\nContent-Length: ");
+        request.append(text::intToString(body.length()));
+        request.append("\r\n\r\n");
+        request.append(body);
+        return http::parseResponse(exchange(host, port, request));
+    }
+}

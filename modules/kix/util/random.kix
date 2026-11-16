@@ -1,0 +1,72 @@
+import kix.string;
+import kix.util.bytes;
+import kix.syscalls;
+import kix.error.exceptions;
+
+namespace random {
+    public bytes(count: int): String throws Exception {
+        if (count < 0) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "negative byte count");
+        }
+        String buffer = new String();
+        buffer.reserve(count + 1);
+        int result = syscalls::getrandom(buffer, count, 0);
+        if (result < 0) {
+            throw new Exception(ExceptionKind.Io, result, "getrandom failed");
+        }
+        String output = new String();
+        int i = 0;
+        while (i < count) {
+            output.appendByte(buffer.byteAt(i));
+            i = i + 1;
+        }
+        return output;
+    }
+
+    public intBelow(limit: int): int throws Exception {
+        if (limit <= 0) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "limit must be positive");
+        }
+        Bytes buffer = new Bytes(bytes(8));
+        return buffer.readU64LE(0) % limit;
+    }
+
+    public intRange(low: int, high: int): int throws Exception {
+        if (high <= low) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid range");
+        }
+        return low + intBelow(high - low);
+    }
+
+    public boolean(): bool throws Exception {
+        return intBelow(2) == 1;
+    }
+
+    public class Rng {
+        private state: int;
+
+        public Rng(seed: int) {
+            self.state = seed;
+            if (self.state <= 0) self.state = 1;
+        }
+
+        public next(): int {
+            self.state = (self.state * 1103515245 + 12345) % 2147483648;
+            return self.state;
+        }
+
+        public nextBelow(limit: int): int {
+            if (limit <= 0) return 0;
+            return self.next() % limit;
+        }
+
+        public nextFloat(): float {
+            float value = self.nextBelow(1000000);
+            return value / 1000000.0;
+        }
+
+        public nextBool(): bool {
+            return self.nextBelow(2) == 1;
+        }
+    }
+}

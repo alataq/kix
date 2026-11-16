@@ -1,0 +1,51 @@
+import kix.string;
+import kix.util.encoding;
+import kix.security.hash;
+import kix.util.random;
+import kix.error.exceptions;
+
+namespace crypto {
+    public secureRandom(count: int): String throws Exception {
+        return random::bytes(count);
+    }
+
+    public constantTimeEquals(left: String, right: String): bool {
+        if (left.length() != right.length()) return false;
+        int diff = 0;
+        int i = 0;
+        while (i < left.length()) {
+            int a = left.byteAt(i);
+            int b = right.byteAt(i);
+            if (a < 0) a = a + 256;
+            if (b < 0) b = b + 256;
+            diff = diff | (a ^ b);
+            i = i + 1;
+        }
+        return diff == 0;
+    }
+
+    private blockKey(key: String): String throws Exception {
+        if (key.length() > 64) return hash::sha256Bytes(key);
+        String result = new String(key);
+        while (result.length() < 64) result.appendByte('\0');
+        return result;
+    }
+
+    public hmacSha256(key: String, data: String): String throws Exception {
+        String normalized = blockKey(key);
+        String innerPad = new String();
+        String outerPad = new String();
+        int i = 0;
+        while (i < 64) {
+            int value = normalized.byteAt(i);
+            if (value < 0) value = value + 256;
+            innerPad.appendByte((value ^ 54) as char);
+            outerPad.appendByte((value ^ 92) as char);
+            i = i + 1;
+        }
+        String inner = innerPad.concat(data);
+        String innerHash = hash::sha256Bytes(inner);
+        String outer = outerPad.concat(innerHash);
+        return encoding::hexEncode(hash::sha256Bytes(outer));
+    }
+}

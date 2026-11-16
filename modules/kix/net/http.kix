@@ -1,0 +1,602 @@
+import kix.string;
+import kix.vector;
+import kix.util.text;
+import kix.collections;
+import kix.net;
+import kix.net.dns;
+import kix.net.mime;
+import kix.util.path;
+import kix.fs;
+import kix.error.exceptions;
+
+namespace http {
+    public class Headers {
+        private data: StringMap<String>;
+
+        public Headers() {
+            self.data = new StringMap<String>();
+        }
+
+        public set(name: String, value: String): void {
+            self.data.put(name, value);
+        }
+
+        public get(name: String): String throws Exception {
+            return self.data.get(name);
+        }
+
+        public getOr(name: String, fallback: String): String {
+            return self.data.getOr(name, fallback);
+        }
+
+        public has(name: String): bool {
+            return self.data.contains(name);
+        }
+
+        public keys(): Vector<String> {
+            return self.data.keys();
+        }
+    }
+
+    public class Request {
+        public method: String;
+        public target: String;
+        public version: String;
+        public headers: Headers;
+        public body: String;
+
+        public Request() {
+            self.method = "GET";
+            self.target = "/";
+            self.version = "HTTP/1.1";
+            self.headers = new Headers();
+            self.body = new String();
+        }
+    }
+
+    public class Response {
+        public status: int;
+        public reason: String;
+        public headers: Headers;
+        public body: String;
+
+        public Response(status: int) {
+            self.status = status;
+            self.reason = reasonFor(status);
+            self.headers = new Headers();
+            self.body = new String();
+        }
+
+        public Response(status: int, body: String) {
+            self.status = status;
+            self.reason = reasonFor(status);
+            self.headers = new Headers();
+            self.body = body;
+        }
+    }
+
+    public reasonFor(status: int): String {
+        if (status == 200) return "OK";
+        if (status == 201) return "Created";
+        if (status == 204) return "No Content";
+        if (status == 301) return "Moved Permanently";
+        if (status == 302) return "Found";
+        if (status == 304) return "Not Modified";
+        if (status == 400) return "Bad Request";
+        if (status == 401) return "Unauthorized";
+        if (status == 403) return "Forbidden";
+        if (status == 404) return "Not Found";
+        if (status == 405) return "Method Not Allowed";
+        if (status == 500) return "Internal Server Error";
+        if (status == 502) return "Bad Gateway";
+        if (status == 503) return "Service Unavailable";
+        return "Unknown";
+    }
+
+    private splitMessage(value: String): Vector<String> {
+        Vector<String> result = new Vector<String>();
+        int index = text::indexOf(value, "\r\n\r\n");
+        if (index < 0) {
+            result.push(value);
+            result.push("");
+        } else {
+            result.push(value.substring(0, index));
+            result.push(value.substring(index + 4, value.length() - index - 4));
+        }
+        return result;
+    }
+
+    private parseHeaders(lines: Vector<String>, start: int): Headers throws Exception {
+        Headers headers = new Headers();
+        int i = start;
+        while (i < lines.length()) {
+            String line = lines.at(i);
+            if (!line.isEmpty()) {
+                int colon = text::indexOf(line, ":");
+                if (colon <= 0) {
+                    throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid HTTP header");
+                }
+                String name = text::trim(line.substring(0, colon));
+                String value = text::trim(line.substring(colon + 1, line.length() - colon - 1));
+                headers.set(name, value);
+            }
+            i = i + 1;
+        }
+        return headers;
+    }
+
+    private hexValue(value: char): int {
+        int code = value;
+        if (code >= 48 && code <= 57) return code - 48;
+        if (code >= 65 && code <= 70) return code - 55;
+        if (code >= 97 && code <= 102) return code - 87;
+        return -1;
+    }
+
+    private parseHex(value: String): int throws Exception {
+        int result = 0;
+        int i = 0;
+        while (i < value.length()) {
+            int digit = hexValue(value.byteAt(i));
+            if (digit < 0) throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid chunk size");
+            result = result * 16 + digit;
+            i = i + 1;
+        }
+        return result;
+    }
+
+    private hexText(value: int): String {
+        String digits = "0123456789abcdef";
+        if (value == 0) return "0";
+        String reversed = new String();
+        int number = value;
+        while (number > 0) {
+            reversed.appendByte(digits.byteAt(number % 16));
+            number = number / 16;
+        }
+        String result = new String();
+        int i = reversed.length() - 1;
+        while (i >= 0) { result.appendByte(reversed.byteAt(i)); i = i - 1; }
+        return result;
+    }
+
+    private chunkedBody(value: String): String throws Exception {
+        String result = new String();
+        int offset = 0;
+        while (offset < value.length()) {
+            int lineEnd = text::indexOfFrom(value, "\r\n", offset);
+            if (lineEnd < 0) throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid chunked body");
+            int size = parseHex(value.substring(offset, lineEnd - offset));
+            if (size == 0) break;
+            int start = lineEnd + 2;
+            if (start + size > value.length()) throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated chunked body");
+            result.append(value.substring(start, size));
+            offset = start + size + 2;
+        }
+        return result;
+    }
+
+    private readLine(connection: net::TcpConnection, buffer: String): String throws Exception {
+        while (true) {
+            int index = text::indexOf(buffer, "\r\n");
+            if (index >= 0) {
+                String line = buffer.substring(0, index);
+                String rest = buffer.substring(index + 2, buffer.length() - index - 2);
+                buffer.clear();
+                buffer.append(rest);
+                return line;
+            }
+            String chunk = connection.read(4096);
+            if (chunk.isEmpty()) throw new Exception(ExceptionKind.InvalidArgument, -22, "unexpected end of chunked body");
+            buffer.append(chunk);
+        }
+    }
+
+    private readChunked(connection: net::TcpConnection, initial: String): String throws Exception {
+        String buffer = new String(initial);
+        String result = new String();
+        while (true) {
+            String line = readLine(connection, buffer);
+            int semicolon = text::indexOf(line, ";");
+            if (semicolon >= 0) line = line.substring(0, semicolon);
+            int size = parseHex(text::trim(line));
+            if (size == 0) {
+                String trailer = readLine(connection, buffer);
+                while (!trailer.isEmpty()) {
+                    trailer = readLine(connection, buffer);
+                }
+                break;
+            }
+            while (buffer.length() < size + 2) {
+                String chunk = connection.read(4096);
+                if (chunk.isEmpty()) throw new Exception(ExceptionKind.InvalidArgument, -22, "truncated chunked body");
+                buffer.append(chunk);
+            }
+            result.append(buffer.substring(0, size));
+            String rest = buffer.substring(size + 2, buffer.length() - size - 2);
+            buffer.clear();
+            buffer.append(rest);
+        }
+        return result;
+    }
+
+    public chunkedEncode(value: String): String throws Exception {
+        String result = new String();
+        result.append(hexText(value.length()));
+        result.append("\r\n");
+        result.append(value);
+        result.append("\r\n0\r\n\r\n");
+        return result;
+    }
+
+    public chunkedDecode(value: String): String throws Exception {
+        return chunkedBody(value);
+    }
+
+    public class Part {
+        public name: String;
+        public filename: String;
+        public contentType: String;
+        public data: String;
+
+        public Part() {
+            self.name = new String();
+            self.filename = new String();
+            self.contentType = new String();
+            self.data = new String();
+        }
+    }
+
+    public parseMultipart(body: String, boundary: String): Vector<Part> throws Exception {
+        Vector<Part> result = new Vector<Part>();
+        String delimiter = "--".concat(boundary);
+        Vector<String> chunks = text::split(body, delimiter);
+        int i = 1;
+        while (i < chunks.length()) {
+            String chunk = chunks.at(i);
+            if (text::startsWith(chunk, "--")) break;
+            if (text::startsWith(chunk, "\r\n")) chunk = chunk.substring(2, chunk.length() - 2);
+            int headerEnd = text::indexOf(chunk, "\r\n\r\n");
+            if (headerEnd < 0) { i = i + 1; continue; }
+            String headerText = chunk.substring(0, headerEnd);
+            String data = chunk.substring(headerEnd + 4, chunk.length() - headerEnd - 4);
+            if (text::endsWith(data, "\r\n")) data = data.substring(0, data.length() - 2);
+            Vector<String> lines = text::split(headerText, "\r\n");
+            Part part = new Part();
+            int j = 0;
+            while (j < lines.length()) {
+                String line = lines.at(j);
+                if (text::startsWith(line, "Content-Disposition:")) {
+                    int nameIndex = text::indexOf(line, "name=\"");
+                    if (nameIndex >= 0) {
+                        int start = nameIndex + 6;
+                        int end = text::indexOfFrom(line, "\"", start);
+                        if (end >= 0) part.name = line.substring(start, end - start);
+                    }
+                    int fileIndex = text::indexOf(line, "filename=\"");
+                    if (fileIndex >= 0) {
+                        int start = fileIndex + 10;
+                        int end = text::indexOfFrom(line, "\"", start);
+                        if (end >= 0) part.filename = line.substring(start, end - start);
+                    }
+                } else if (text::startsWith(line, "Content-Type:")) {
+                    part.contentType = text::trim(line.substring(13, line.length() - 13));
+                }
+                j = j + 1;
+            }
+            part.data = data;
+            result.push(part);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public boundaryFrom(contentType: String): String throws Exception {
+        int index = text::indexOf(contentType, "boundary=");
+        if (index < 0) return "";
+        String value = text::trim(contentType.substring(index + 9, contentType.length() - index - 9));
+        if (value.length() >= 2 && value.byteAt(0) == '"' && value.byteAt(value.length() - 1) == '"') {
+            value = value.substring(1, value.length() - 2);
+        }
+        return value;
+    }
+
+    public parseRequest(value: String): Request throws Exception {
+        Vector<String> parts = splitMessage(value);
+        Vector<String> lines = text::split(parts.at(0), "\r\n");
+        String requestLine = lines.at(0);
+        Vector<String> tokens = text::split(requestLine, " ");
+        if (tokens.length() < 3) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid HTTP request line");
+        }
+        Request request = new Request();
+        request.method = tokens.at(0);
+        request.target = tokens.at(1);
+        request.version = tokens.at(2);
+        request.headers = parseHeaders(lines, 1);
+        request.body = parts.at(1);
+        return request;
+    }
+
+    public parseResponse(value: String): Response throws Exception {
+        Vector<String> parts = splitMessage(value);
+        Vector<String> lines = text::split(parts.at(0), "\r\n");
+        String statusLine = lines.at(0);
+        Vector<String> tokens = text::split(statusLine, " ");
+        if (tokens.length() < 2) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid HTTP status line");
+        }
+        Response response = new Response(text::parseInt(tokens.at(1)));
+        if (tokens.length() >= 3) response.reason = tokens.at(2);
+        response.headers = parseHeaders(lines, 1);
+        response.body = parts.at(1);
+        if (response.headers.has("Transfer-Encoding") && text::contains(response.headers.get("Transfer-Encoding"), "chunked")) {
+            response.body = chunkedBody(response.body);
+        }
+        return response;
+    }
+
+    public serializeRequest(request: Request): String throws Exception {
+        String result = new String();
+        result.append(request.method);
+        result.append(" ");
+        result.append(request.target);
+        result.append(" ");
+        result.append(request.version);
+        result.append("\r\n");
+        Vector<String> keys = request.headers.keys();
+        int i = 0;
+        while (i < keys.length()) {
+            String key = keys.at(i);
+            result.append(key);
+            result.append(": ");
+            result.append(request.headers.get(key));
+            result.append("\r\n");
+            i = i + 1;
+        }
+        result.append("\r\n");
+        result.append(request.body);
+        return result;
+    }
+
+    public serializeResponse(response: Response): String throws Exception {
+        String result = new String();
+        result.append("HTTP/1.1 ");
+        result.append(text::intToString(response.status));
+        result.append(" ");
+        result.append(response.reason);
+        result.append("\r\n");
+        Vector<String> keys = response.headers.keys();
+        int i = 0;
+        while (i < keys.length()) {
+            String key = keys.at(i);
+            result.append(key);
+            result.append(": ");
+            result.append(response.headers.get(key));
+            result.append("\r\n");
+            i = i + 1;
+        }
+        result.append("Content-Length: ");
+        result.append(text::intToString(response.body.length()));
+        result.append("\r\n\r\n");
+        result.append(response.body);
+        return result;
+    }
+
+    public get(host: String, port: int, target: String): Response throws Exception {
+        String address = net.dns::resolve(host);
+        net::TcpConnection connection = net::connect(address, port);
+        Request request = new Request();
+        request.method = "GET";
+        request.target = target;
+        String hostPort = host.concat(":");
+        hostPort.append(text::intToString(port));
+        request.headers.set("Host", hostPort);
+        request.headers.set("Connection", "close");
+        connection.write(serializeRequest(request));
+        String raw = connection.readAll();
+        connection.close();
+        return parseResponse(raw);
+    }
+
+    public send(connection: net::TcpConnection, response: Response): void throws Exception {
+        connection.write(serializeResponse(response));
+    }
+
+    public cookies(headers: Headers): StringMap<String> throws Exception {
+        StringMap<String> result = new StringMap<String>();
+        if (!headers.has("Cookie")) return result;
+        Vector<String> parts = text::split(headers.get("Cookie"), ";");
+        int i = 0;
+        while (i < parts.length()) {
+            String part = text::trim(parts.at(i));
+            int equals = text::indexOf(part, "=");
+            if (equals > 0) {
+                result.put(
+                    text::trim(part.substring(0, equals)),
+                    text::trim(part.substring(equals + 1, part.length() - equals - 1))
+                );
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public class StaticHandler implements Handler {
+        private root: String;
+        private indexName: String;
+
+        public StaticHandler(root: String) {
+            self.root = root;
+            self.indexName = "index.html";
+        }
+
+        public setIndex(name: String): void {
+            self.indexName = name;
+        }
+
+        public handle(request: Request): Response throws Exception {
+            String target = request.target;
+            int query = text::indexOf(target, "?");
+            if (query >= 0) target = target.substring(0, query);
+            String safe = path::normalize(target);
+            if (path::isAbsolute(safe) || safe.equals("..") || text::startsWith(safe, "../")) {
+                return new Response(404, "not found");
+            }
+            String file = path::join(self.root, safe);
+            if (fs::isDirectory(file)) file = path::join(file, self.indexName);
+            if (!fs::isFile(file)) return new Response(404, "not found");
+            Response response = new Response(200, fs::readFile(file));
+            response.headers.set("Content-Type", mime::contentTypeForExtension(path::extension(file)));
+            return response;
+        }
+    }
+
+    public readRequest(connection: net::TcpConnection): Request throws Exception {
+        String raw = new String();
+        while (text::indexOf(raw, "\r\n\r\n") < 0) {
+            String chunk = connection.read(4096);
+            if (chunk.isEmpty()) break;
+            raw.append(chunk);
+        }
+        Request request = parseRequest(raw);
+        if (request.headers.has("Transfer-Encoding") && text::contains(request.headers.get("Transfer-Encoding"), "chunked")) {
+            request.body = readChunked(connection, request.body);
+            return request;
+        }
+        if (request.headers.has("Content-Length")) {
+            int length = text::parseInt(request.headers.get("Content-Length"));
+            while (request.body.length() < length) {
+                String chunk = connection.read(4096);
+                if (chunk.isEmpty()) break;
+                request.body.append(chunk);
+            }
+        }
+        return request;
+    }
+}
+
+namespace http {
+    public interface Handler {
+        handle(request: Request): Response throws Exception;
+    }
+
+    public class Router implements Handler {
+        private routes: StringMap<Handler>;
+
+        public Router() {
+            self.routes = new StringMap<Handler>();
+        }
+
+        public set(path: String, handler: Handler): void {
+            self.routes.put(path, handler);
+        }
+
+        public handle(request: Request): Response throws Exception {
+            if (self.routes.contains(request.target)) {
+                Handler handler = self.routes.get(request.target);
+                return handler.handle(request);
+            }
+            Response response = new Response(404);
+            response.headers.set("Content-Type", "text/plain");
+            response.body = "not found";
+            return response;
+        }
+    }
+
+    public &handleConnection(connection: net::TcpConnection, handler: Handler): void throws Exception {
+        try {
+            Request request = readRequest(connection);
+            Response response = handler.handle(request);
+            send(connection, response);
+        } catch (error: Exception) {
+            Response response = new Response(500, error.message());
+            response.headers.set("Content-Type", "text/plain");
+            send(connection, response);
+        }
+        connection.close();
+    }
+
+    public class Server {
+        private listener: net::TcpListener;
+        private handler: Handler;
+        private closed: bool;
+
+        public Server(handler: Handler) {
+            self.listener = new net::TcpListener();
+            self.handler = handler;
+            self.closed = false;
+        }
+
+        public bind(host: String, port: int): void throws Exception {
+            self.listener.bind(host, port);
+        }
+
+        public serveOnce(): void throws Exception {
+            net::TcpConnection connection = self.listener.accept();
+            try {
+                Request request = readRequest(connection);
+                Response response = self.handler.handle(request);
+                send(connection, response);
+            } catch (error: Exception) {
+                Response response = new Response(500, error.message());
+                response.headers.set("Content-Type", "text/plain");
+                send(connection, response);
+            }
+            connection.close();
+        }
+
+        public serveConcurrent(): void throws Exception {
+            while (!self.closed) {
+                net::TcpConnection connection = self.listener.accept();
+                handleConnection(connection, self.handler);
+            }
+        }
+
+        public serveKeepAlive(): void throws Exception {
+            while (!self.closed) {
+                net::TcpConnection connection = self.listener.accept();
+                bool keep = true;
+                while (keep) {
+                    try {
+                        Request request = readRequest(connection);
+                        Response response = self.handler.handle(request);
+                        String connectionHeader = request.headers.getOr("Connection", "keep-alive");
+                        keep = !connectionHeader.equals("close");
+                        if (!keep) response.headers.set("Connection", "close");
+                        send(connection, response);
+                    } catch (error: Exception) {
+                        Response response = new Response(500, error.message());
+                        response.headers.set("Content-Type", "text/plain");
+                        response.headers.set("Connection", "close");
+                        send(connection, response);
+                        keep = false;
+                    }
+                }
+                connection.close();
+            }
+        }
+
+        public serveOnceConcurrent(): void throws Exception {
+            net::TcpConnection connection = self.listener.accept();
+            handleConnection(connection, self.handler);
+        }
+
+        public serve(): void throws Exception {
+            while (!self.closed) {
+                self.serveOnce();
+            }
+        }
+
+        public close(): void {
+            if (!self.closed) {
+                self.listener.close();
+                self.closed = true;
+            }
+        }
+
+        public ~Server() {
+            self.close();
+        }
+    }
+}

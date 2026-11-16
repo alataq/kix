@@ -1,0 +1,35 @@
+import kix.string;
+import kix.util.path;
+import kix.util.random;
+import kix.util.encoding;
+import kix.fs;
+import kix.error.exceptions;
+
+namespace tmp {
+    public directory(): String {
+        return "/tmp";
+    }
+
+    public name(prefix: String): String throws Exception {
+        String randomPart = encoding::hexEncode(random::bytes(8));
+        return path::join(directory(), prefix.concat(randomPart));
+    }
+
+    public file(prefix: String): String throws Exception {
+        String candidate = name(prefix);
+        File file = new File();
+        if (file.open(candidate, "wx")) {
+            file.close();
+            return candidate;
+        }
+        int code = file.error();
+        file.close();
+        throw new Exception(ExceptionKind.Io, code, "could not create temporary file");
+    }
+
+    public dir(prefix: String): String throws Exception {
+        String candidate = name(prefix);
+        fs::mkdir(candidate, 448);
+        return candidate;
+    }
+}

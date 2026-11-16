@@ -1,0 +1,118 @@
+import kix.string;
+import kix.vector;
+import kix.util.text;
+import kix.collections;
+import kix.data.serde;
+import kix.error.exceptions;
+
+namespace yaml {
+    private parseScalar(value: String): Value throws Exception {
+        String trimmed = text::trim(value);
+        if (trimmed.equals("null") || trimmed.equals("~")) return new Value(Kind.Null);
+        if (trimmed.equals("true")) return new Value(true);
+        if (trimmed.equals("false")) return new Value(false);
+        if (trimmed.length() >= 2 && trimmed.byteAt(0) == '"' && trimmed.byteAt(trimmed.length() - 1) == '"') {
+            return new Value(trimmed.substring(1, trimmed.length() - 2));
+        }
+        if (trimmed.length() >= 2 && trimmed.byteAt(0) == '\'' && trimmed.byteAt(trimmed.length() - 1) == '\'') {
+            return new Value(trimmed.substring(1, trimmed.length() - 2));
+        }
+        bool numeric = true;
+        int i = 0;
+        if (trimmed.byteAt(0) == '-' || trimmed.byteAt(0) == '+') i = 1;
+        if (i >= trimmed.length()) numeric = false;
+        int dots = 0;
+        while (i < trimmed.length()) {
+            int code = trimmed.byteAt(i);
+            if (code == '.') dots = dots + 1;
+            else if (code < 48 || code > 57) numeric = false;
+            i = i + 1;
+        }
+        if (numeric && dots == 0) return new Value(text::parseInt(trimmed));
+        if (numeric && dots == 1) return new Value(text::parseFloat(trimmed));
+        return new Value(trimmed);
+    }
+
+    public parse(source: String): Value throws Exception {
+        Value root = new Value(new StringMap<Value>());
+        Vector<Value> tables = new Vector<Value>();
+        Vector<int> indents = new Vector<int>();
+        tables.push(root);
+        indents.push(0);
+        Vector<String> lines = text::split(source, "\n");
+        int index = 0;
+        while (index < lines.length()) {
+            String line = lines.at(index);
+            index = index + 1;
+            String trimmed = text::trim(line);
+            if (trimmed.isEmpty() || trimmed.byteAt(0) == '#') continue;
+            int indent = 0;
+            while (indent < line.length() && line.byteAt(indent) == ' ') indent = indent + 1;
+            while (indents.length() > 1 && indent < indents.at(indents.length() - 1)) {
+                indents.pop();
+                tables.pop();
+            }
+            int colon = text::indexOf(trimmed, ":");
+            if (colon <= 0) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "unsupported YAML line");
+            }
+            String key = text::trim(trimmed.substring(0, colon));
+            String valuePart = text::trim(trimmed.substring(colon + 1, trimmed.length() - colon - 1));
+            Value table = tables.at(tables.length() - 1);
+            if (valuePart.isEmpty()) {
+                Value child = new Value(new StringMap<Value>());
+                table.objectValue.put(key, child);
+                tables.push(child);
+                indents.push(indent + 1);
+            } else {
+                table.objectValue.put(key, parseScalar(valuePart));
+            }
+        }
+        return root;
+    }
+
+    private writeTable(result: String, value: Value, indent: int): void throws Exception {
+        Vector<String> keys = value.objectValue.keys();
+        int i = 0;
+        while (i < keys.length()) {
+            String key = keys.at(i);
+            Value child = value.objectValue.get(key);
+            int j = 0;
+            while (j < indent) { result.append("  "); j = j + 1; }
+            result.append(key);
+            result.append(":");
+            if (child.kind == Kind.Object) {
+                result.append("\n");
+                writeTable(result, child, indent + 1);
+            } else if (child.kind == Kind.String) {
+                result.append(" ");
+                result.append(child.stringValue);
+                result.append("\n");
+            } else if (child.kind == Kind.Int) {
+                result.append(" ");
+                result.append(text::intToString(child.intValue));
+                result.append("\n");
+            } else if (child.kind == Kind.Float) {
+                result.append(" ");
+                result.append(text::floatToString(child.floatValue, 6));
+                result.append("\n");
+            } else if (child.kind == Kind.Bool) {
+                result.append(" ");
+                if (child.boolValue) result.append("true"); else result.append("false");
+                result.append("\n");
+            } else if (child.kind == Kind.Null) {
+                result.append(" null\n");
+            }
+            i = i + 1;
+        }
+    }
+
+    public stringify(value: Value): String throws Exception {
+        if (value.kind != Kind.Object) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "YAML root must be an object");
+        }
+        String result = new String();
+        writeTable(result, value, 0);
+        return result;
+    }
+}

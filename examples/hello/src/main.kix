@@ -1,0 +1,42 @@
+import kix.io;
+import kix.string;
+
+public main(): int {
+    io::println("Hello from Kix!");
+
+    // --- fixed-size int array ---
+    int[5] scores;
+    scores[0] = 10;
+    scores[1] = 20;
+    scores[2] = 30;
+    scores[3] = 40;
+    scores[4] = 50;
+
+    int total = 0;
+    for (int i = 0; i < 5; i = i + 1) {
+        total = total + scores[i];
+    }
+    io::printf("Total score: %lld\n", total);
+
+    // --- fixed-size char buffer (manual string building) ---
+    char[8] greeting;
+    greeting[0] = 'H';
+    greeting[1] = 'i';
+    greeting[2] = '!';
+    greeting[3] = '\0';
+
+    io::printf("Greeting: %s\n", greeting);
+
+    // --- array element update ---
+    scores[2] = 300;
+    int updated = scores[2];
+    io::printf("Updated element: %lld\n", updated);
+
+    // --- String class ---
+    String message = new String();
+    message.append("Kix");
+    message.append(" arrays work.");
+    io::println(message);
+
+    return 0;
+}

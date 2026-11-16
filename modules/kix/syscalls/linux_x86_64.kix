@@ -1,0 +1,296 @@
+// Linux x86_64 syscall wrappers.
+//
+// The syscall numbers are the Linux x86_64 ABI values. Kix has no pointer
+// type, so buffer-taking syscalls accept a String and pass its buffer address
+// (an int handle) to the kernel.
+//
+// Add more wrappers here as needed; the number in `syscall(...)` is the
+// canonical Linux x86_64 syscall number.
+import kix.string;
+
+namespace syscalls {
+    // read = 0, write = 1, open = 2, close = 3
+    public read(fd: int, buffer: String, count: int): int {
+        return syscall(0, fd, buffer.address(), count);
+    }
+
+    public write(fd: int, buffer: String, count: int): int {
+        return syscall(1, fd, buffer.address(), count);
+    }
+
+    public open(path: String, flags: int, mode: int): int {
+        return syscall(2, path.address(), flags, mode);
+    }
+
+    public close(fd: int): int {
+        return syscall(3, fd);
+    }
+
+    // fstat = 5
+    public fstat(fd: int, buffer: String): int {
+        return syscall(5, fd, buffer.address());
+    }
+
+    // lseek = 8
+    public lseek(fd: int, offset: int, whence: int): int {
+        return syscall(8, fd, offset, whence);
+    }
+
+    // access = 21
+    public access(path: String, mode: int): int {
+        return syscall(21, path.address(), mode);
+    }
+
+    // dup = 32, dup2 = 33
+    public dup(fd: int): int {
+        return syscall(32, fd);
+    }
+
+    public dup2(oldFd: int, newFd: int): int {
+        return syscall(33, oldFd, newFd);
+    }
+
+    // getpid = 39
+    public getpid(): int {
+        return syscall(39);
+    }
+
+    // socket = 41, connect = 42, accept = 43, bind = 49, listen = 50,
+    // getsockname = 51, getpeername = 52, socketpair = 53,
+    // setsockopt = 54, getsockopt = 55, shutdown = 48
+    public socket(domain: int, kind: int, protocol: int): int {
+        return syscall(41, domain, kind, protocol);
+    }
+
+    public connect(fd: int, address: String, length: int): int {
+        return syscall(42, fd, address.address(), length);
+    }
+
+    public accept(fd: int, address: String, length: String): int {
+        return syscall(43, fd, address.address(), length.address());
+    }
+
+    public bind(fd: int, address: String, length: int): int {
+        return syscall(49, fd, address.address(), length);
+    }
+
+    public listen(fd: int, backlog: int): int {
+        return syscall(50, fd, backlog);
+    }
+
+    public getsockname(fd: int, address: String, length: String): int {
+        return syscall(51, fd, address.address(), length.address());
+    }
+
+    public getpeername(fd: int, address: String, length: String): int {
+        return syscall(52, fd, address.address(), length.address());
+    }
+
+    public setsockopt(fd: int, level: int, name: int, value: String, length: int): int {
+        return syscall(54, fd, level, name, value.address(), length);
+    }
+
+    public getsockopt(fd: int, level: int, name: int, value: String, length: String): int {
+        return syscall(55, fd, level, name, value.address(), length.address());
+    }
+
+    public shutdown(fd: int, how: int): int {
+        return syscall(48, fd, how);
+    }
+
+    // sendto = 44, recvfrom = 45
+    public sendto(fd: int, buffer: String, count: int, flags: int, address: String, length: int): int {
+        return syscall(44, fd, buffer.address(), count, flags, address.address(), length);
+    }
+
+    public recvfrom(fd: int, buffer: String, count: int, flags: int, address: String, length: String): int {
+        return syscall(45, fd, buffer.address(), count, flags, address.address(), length.address());
+    }
+
+    // fork = 57, exit = 60, kill = 62, uname = 63
+    public fork(): int {
+        return syscall(57);
+    }
+
+    public exit(status: int): void {
+        syscall(60, status);
+    }
+
+    public kill(pid: int, signal: int): int {
+        return syscall(62, pid, signal);
+    }
+
+    public uname(buffer: String): int {
+        return syscall(63, buffer.address());
+    }
+
+    // fcntl = 72
+    public fcntl(fd: int, command: int, argument: int): int {
+        return syscall(72, fd, command, argument);
+    }
+
+    // fsync = 74, fdatasync = 75, truncate = 76, ftruncate = 77
+    public fsync(fd: int): int {
+        return syscall(74, fd);
+    }
+
+    public fdatasync(fd: int): int {
+        return syscall(75, fd);
+    }
+
+    public truncate(path: String, length: int): int {
+        return syscall(76, path.address(), length);
+    }
+
+    public ftruncate(fd: int, length: int): int {
+        return syscall(77, fd, length);
+    }
+
+    // getcwd = 79, chdir = 80, rename = 82, mkdir = 83, rmdir = 84,
+    // creat = 85, link = 86, unlink = 87, symlink = 88, readlink = 89,
+    // chmod = 90, fchmod = 91, chown = 92, fchown = 93, lchown = 94,
+    // umask = 95
+    public getcwd(buffer: String, size: int): int {
+        return syscall(79, buffer.address(), size);
+    }
+
+    public chdir(path: String): int {
+        return syscall(80, path.address());
+    }
+
+    public rename(oldPath: String, newPath: String): int {
+        return syscall(82, oldPath.address(), newPath.address());
+    }
+
+    public mkdir(path: String, mode: int): int {
+        return syscall(83, path.address(), mode);
+    }
+
+    public rmdir(path: String): int {
+        return syscall(84, path.address());
+    }
+
+    public creat(path: String, mode: int): int {
+        return syscall(85, path.address(), mode);
+    }
+
+    public link(oldPath: String, newPath: String): int {
+        return syscall(86, oldPath.address(), newPath.address());
+    }
+
+    public unlink(path: String): int {
+        return syscall(87, path.address());
+    }
+
+    public symlink(target: String, linkPath: String): int {
+        return syscall(88, target.address(), linkPath.address());
+    }
+
+    public readlink(path: String, buffer: String, size: int): int {
+        return syscall(89, path.address(), buffer.address(), size);
+    }
+
+    public chmod(path: String, mode: int): int {
+        return syscall(90, path.address(), mode);
+    }
+
+    public fchmod(fd: int, mode: int): int {
+        return syscall(91, fd, mode);
+    }
+
+    public chown(path: String, owner: int, group: int): int {
+        return syscall(92, path.address(), owner, group);
+    }
+
+    public fchown(fd: int, owner: int, group: int): int {
+        return syscall(93, fd, owner, group);
+    }
+
+    public lchown(path: String, owner: int, group: int): int {
+        return syscall(94, path.address(), owner, group);
+    }
+
+    public umask(mask: int): int {
+        return syscall(95, mask);
+    }
+
+    // nanosleep = 35
+    public nanosleep(request: String, remaining: String): int {
+        return syscall(35, request.address(), remaining.address());
+    }
+
+    // gettimeofday = 96
+    public gettimeofday(time: String, timezone: String): int {
+        return syscall(96, time.address(), timezone.address());
+    }
+
+    // getuid = 102, getgid = 104, setuid = 105, setgid = 106,
+    // geteuid = 107, getegid = 108, getppid = 110, setsid = 112
+    public getuid(): int {
+        return syscall(102);
+    }
+
+    public getgid(): int {
+        return syscall(104);
+    }
+
+    public setuid(uid: int): int {
+        return syscall(105, uid);
+    }
+
+    public setgid(gid: int): int {
+        return syscall(106, gid);
+    }
+
+    public geteuid(): int {
+        return syscall(107);
+    }
+
+    public getegid(): int {
+        return syscall(108);
+    }
+
+    public getppid(): int {
+        return syscall(110);
+    }
+
+    public setsid(): int {
+        return syscall(112);
+    }
+
+    // epoll_wait = 232, epoll_ctl = 233, epoll_create1 = 291
+    public epollWait(epfd: int, events: String, maxEvents: int, timeout: int): int {
+        return syscall(232, epfd, events.address(), maxEvents, timeout);
+    }
+
+    public epollCtl(epfd: int, op: int, fd: int, event: String): int {
+        return syscall(233, epfd, op, fd, event.address());
+    }
+
+    public epollCreate1(flags: int): int {
+        return syscall(291, flags);
+    }
+
+    // getdents64 = 217
+    public getdents64(fd: int, buffer: String, count: int): int {
+        return syscall(217, fd, buffer.address(), count);
+    }
+
+    // exit_group = 231
+    public exitGroup(status: int): void {
+        syscall(231, status);
+    }
+
+    // getrandom = 318, memfd_create = 319, statx = 332
+    public getrandom(buffer: String, length: int, flags: int): int {
+        return syscall(318, buffer.address(), length, flags);
+    }
+
+    public memfdCreate(name: String, flags: int): int {
+        return syscall(319, name.address(), flags);
+    }
+
+    public statx(fd: int, path: String, flags: int, mask: int, buffer: String): int {
+        return syscall(332, fd, path.address(), flags, mask, buffer.address());
+    }
+}

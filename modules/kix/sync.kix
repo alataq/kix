@@ -1,0 +1,63 @@
+namespace sync {
+    public class Mutex {
+        private handle: int;
+
+        public Mutex() {
+            self.handle = syncMutexCreate();
+        }
+
+        public lock(): void {
+            syncMutexLock(self.handle);
+        }
+
+        public unlock(): void {
+            syncMutexUnlock(self.handle);
+        }
+
+        public raw(): int {
+            return self.handle;
+        }
+
+        public close(): void {
+            if (self.handle != 0) {
+                syncMutexDestroy(self.handle);
+                self.handle = 0;
+            }
+        }
+
+        public ~Mutex() {
+            self.close();
+        }
+    }
+
+    public class Condvar {
+        private handle: int;
+
+        public Condvar() {
+            self.handle = syncCondvarCreate();
+        }
+
+        public wait(mutex: Mutex): void {
+            syncCondvarWait(self.handle, mutex.raw());
+        }
+
+        public signal(): void {
+            syncCondvarSignal(self.handle);
+        }
+
+        public broadcast(): void {
+            syncCondvarBroadcast(self.handle);
+        }
+
+        public close(): void {
+            if (self.handle != 0) {
+                syncCondvarDestroy(self.handle);
+                self.handle = 0;
+            }
+        }
+
+        public ~Condvar() {
+            self.close();
+        }
+    }
+}

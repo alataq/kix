@@ -1,0 +1,24 @@
+{
+  "name": "kix",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "description": "kixt — the Kix v1 compiler",
+  "bin": {
+    "kixt": "./src/cli.ts"
+  },
+  "scripts": {
+    "kixt": "bun run src/cli.ts",
+    "build": "bun run src/cli.ts build",
+    "check": "bun run src/cli.ts check",
+    "example": "bun run src/cli.ts build examples/hello",
+    "pack": "bun run scripts/pack.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.0"
+  }
+}

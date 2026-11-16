@@ -1,0 +1,61 @@
+import kix.string;
+
+namespace error.exceptions {
+    public enum ExceptionKind {
+        None,
+        NotFound,
+        PermissionDenied,
+        AlreadyExists,
+        NotDirectory,
+        IsDirectory,
+        InvalidArgument,
+        Io,
+        OutOfMemory,
+        Other,
+    }
+
+    public class Error {
+        private kindValue: ExceptionKind;
+        private codeValue: int;
+        private messageValue: String;
+
+        public Error(kind: ExceptionKind, code: int, message: String) {
+            self.kindValue = kind;
+            self.codeValue = code;
+            self.messageValue = message;
+        }
+
+        public kind(): ExceptionKind {
+            return self.kindValue;
+        }
+
+        public code(): int {
+            return self.codeValue;
+        }
+
+        public message(): String {
+            return self.messageValue;
+        }
+    }
+
+    public class Exception extends Error {
+        public Exception(kind: ExceptionKind, code: int, message: String) {
+            super(kind, code, message);
+        }
+    }
+
+    public kindFor(code: int): ExceptionKind {
+        if (code == -2) return ExceptionKind.NotFound;
+        if (code == -13) return ExceptionKind.PermissionDenied;
+        if (code == -17) return ExceptionKind.AlreadyExists;
+        if (code == -20) return ExceptionKind.NotDirectory;
+        if (code == -21) return ExceptionKind.IsDirectory;
+        if (code == -22) return ExceptionKind.InvalidArgument;
+        if (code == -5) return ExceptionKind.Io;
+        return ExceptionKind.Other;
+    }
+
+    public fromCode(code: int, message: String): Exception {
+        return new Exception(kindFor(code), code, message);
+    }
+}

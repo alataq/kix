@@ -1,0 +1,223 @@
+import kix.string;
+import kix.vector;
+import kix.util.text;
+import kix.collections;
+import kix.error.exceptions;
+
+namespace xml {
+    public class Node {
+        public name: String;
+        public text: String;
+        public attributes: StringMap<String>;
+        public children: Vector<Node>;
+
+        public Node(name: String) {
+            self.name = name;
+            self.text = new String();
+            self.attributes = new StringMap<String>();
+            self.children = new Vector<Node>();
+        }
+
+        public attribute(name: String): String throws Exception {
+            return self.attributes.get(name);
+        }
+    }
+
+    private charAt(value: String, index: int): char {
+        return value.byteAt(index);
+    }
+
+    public class Parser {
+        private source: String;
+        private index: int;
+
+        public Parser(source: String) {
+            self.source = source;
+            self.index = 0;
+        }
+
+        private error(message: String): void throws Exception {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, message);
+        }
+
+        private skipWhitespace(): void {
+            while (self.index < self.source.length()) {
+                int value = charAt(self.source, self.index);
+                if (value == 32 || value == 9 || value == 10 || value == 13) self.index = self.index + 1;
+                else break;
+            }
+        }
+
+        private skipDeclaration(): void throws Exception {
+            self.skipWhitespace();
+            if (self.index + 1 < self.source.length() && charAt(self.source, self.index) == '<' && charAt(self.source, self.index + 1) == '?') {
+                int end = text::indexOfFrom(self.source, "?>", self.index);
+                if (end < 0) self.error("unterminated XML declaration");
+                self.index = end + 2;
+            }
+            self.skipWhitespace();
+            if (self.index + 3 < self.source.length() && text::startsWith(self.source.substring(self.index, 4), "<!--")) {
+                int end = text::indexOfFrom(self.source, "-->", self.index + 4);
+                if (end < 0) self.error("unterminated XML comment");
+                self.index = end + 3;
+            }
+            self.skipWhitespace();
+        }
+
+        public parse(): Node throws Exception {
+            self.skipDeclaration();
+            Node node = self.parseNode();
+            self.skipWhitespace();
+            return node;
+        }
+
+        private nameEnd(): int {
+            int end = self.index;
+            while (end < self.source.length()) {
+                int value = charAt(self.source, end);
+                if (value == 32 || value == 9 || value == 10 || value == 13 || value == 47 || value == 62) break;
+                end = end + 1;
+            }
+            return end;
+        }
+
+        private decode(value: String): String {
+            String result = new String();
+            int i = 0;
+            while (i < value.length()) {
+                if (i + 4 < value.length() && text::startsWith(value.substring(i, 5), "&amp;")) { result.append("&"); i = i + 5; }
+                else if (i + 3 < value.length() && text::startsWith(value.substring(i, 4), "&lt;")) { result.append("<"); i = i + 4; }
+                else if (i + 3 < value.length() && text::startsWith(value.substring(i, 4), "&gt;")) { result.append(">"); i = i + 4; }
+                else if (i + 5 < value.length() && text::startsWith(value.substring(i, 6), "&quot;")) { result.append("\""); i = i + 6; }
+                else if (i + 5 < value.length() && text::startsWith(value.substring(i, 6), "&apos;")) { result.append("'"); i = i + 6; }
+                else { result.appendByte(value.byteAt(i)); i = i + 1; }
+            }
+            return result;
+        }
+
+        private parseNode(): Node throws Exception {
+            self.expect('<');
+            int end = self.nameEnd();
+            String name = self.source.substring(self.index, end - self.index);
+            self.index = end;
+            Node node = new Node(name);
+            while (true) {
+                self.skipWhitespace();
+                if (self.index >= self.source.length()) self.error("unterminated XML tag");
+                char value = charAt(self.source, self.index);
+                if (value == '/') {
+                    self.index = self.index + 1;
+                    self.expect('>');
+                    return node;
+                }
+                if (value == '>') {
+                    self.index = self.index + 1;
+                    break;
+                }
+                int attributeEnd = self.index;
+                while (attributeEnd < self.source.length()) {
+                    int current = charAt(self.source, attributeEnd);
+                    if (current == 61 || current == 32 || current == 9 || current == 10 || current == 13 || current == 62) break;
+                    attributeEnd = attributeEnd + 1;
+                }
+                String attributeName = self.source.substring(self.index, attributeEnd - self.index);
+                self.index = attributeEnd;
+                self.skipWhitespace();
+                self.expect('=');
+                self.skipWhitespace();
+                if (self.index >= self.source.length()) self.error("invalid XML attribute");
+                char quote = charAt(self.source, self.index);
+                if (quote != '"' && quote != '\'') self.error("invalid XML attribute");
+                self.index = self.index + 1;
+                int start = self.index;
+                while (self.index < self.source.length() && charAt(self.source, self.index) != quote) self.index = self.index + 1;
+                if (self.index >= self.source.length()) self.error("unterminated XML attribute");
+                String attributeValue = self.source.substring(start, self.index - start);
+                node.attributes.put(attributeName, self.decode(attributeValue));
+                self.index = self.index + 1;
+            }
+
+            while (true) {
+                if (self.index >= self.source.length()) self.error("unterminated XML element");
+                if (text::startsWith(self.source.substring(self.index, self.source.length() - self.index), "</")) {
+                    if (self.index + 2 >= self.source.length()) self.error("invalid XML close tag");
+                    self.index = self.index + 2;
+                    int closeEnd = self.nameEnd();
+                    String closeName = self.source.substring(self.index, closeEnd - self.index);
+                    if (!closeName.equals(node.name)) self.error("mismatched XML close tag");
+                    self.index = closeEnd;
+                    self.skipWhitespace();
+                    self.expect('>');
+                    break;
+                }
+                if (charAt(self.source, self.index) == '<') {
+                    node.children.push(self.parseNode());
+                } else {
+                    int start = self.index;
+                    while (self.index < self.source.length() && charAt(self.source, self.index) != '<') self.index = self.index + 1;
+                    node.text.append(self.decode(self.source.substring(start, self.index - start)));
+                }
+            }
+            return node;
+        }
+
+        private expect(character: char): void throws Exception {
+            if (self.index >= self.source.length() || charAt(self.source, self.index) != character) self.error("invalid XML token");
+            self.index = self.index + 1;
+        }
+    }
+
+    public parse(source: String): Node throws Exception {
+        Parser parser = new Parser(source);
+        return parser.parse();
+    }
+
+    private writeEscaped(result: String, value: String): void {
+        int i = 0;
+        while (i < value.length()) {
+            char current = value.byteAt(i);
+            if (current == '&') result.append("&amp;");
+            else if (current == '<') result.append("&lt;");
+            else if (current == '>') result.append("&gt;");
+            else if (current == '"') result.append("&quot;");
+            else result.appendByte(current);
+            i = i + 1;
+        }
+    }
+
+    private writeNode(result: String, node: Node): void {
+        result.append("<");
+        result.append(node.name);
+        Vector<String> keys = node.attributes.keys();
+        int i = 0;
+        while (i < keys.length()) {
+            String key = keys.at(i);
+            result.append(" ");
+            result.append(key);
+            result.append("=\"");
+            writeEscaped(result, node.attributes.getOr(key, ""));
+            result.append("\"");
+            i = i + 1;
+        }
+        if (node.children.isEmpty() && node.text.isEmpty()) {
+            result.append("/>");
+            return;
+        }
+        result.append(">");
+        writeEscaped(result, node.text);
+        i = 0;
+        while (i < node.children.length()) {
+            writeNode(result, node.children.at(i));
+            i = i + 1;
+        }
+        result.append("</");
+        result.append(node.name);
+        result.append(">");
+    }
+
+    public stringify(node: Node): String {
+        String result = new String();
+        writeNode(result, node);
+        return result;
+    }
+}

@@ -1,0 +1,49 @@
+import kix.string;
+import kix.util.bytes;
+import kix.util.text;
+import kix.syscalls;
+import kix.fs;
+import kix.error.exceptions;
+
+namespace os {
+    private unameBuffer(): Bytes throws Exception {
+        Bytes buffer = new Bytes();
+        int i = 0;
+        while (i < 390) { buffer.appendByte(0); i = i + 1; }
+        int result = syscalls::uname(buffer.raw());
+        if (result != 0) {
+            throw new Exception(ExceptionKind.Io, result, "uname failed");
+        }
+        return buffer;
+    }
+
+    private field(buffer: Bytes, offset: int): String {
+        String result = new String();
+        int i = offset;
+        while (i < offset + 65 && buffer.byteAt(i) != 0) {
+            result.appendByte(buffer.byteAt(i) as char);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public platform(): String throws Exception {
+        return field(unameBuffer(), 0);
+    }
+
+    public hostname(): String throws Exception {
+        return field(unameBuffer(), 65);
+    }
+
+    public kernelRelease(): String throws Exception {
+        return field(unameBuffer(), 130);
+    }
+
+    public machine(): String throws Exception {
+        return field(unameBuffer(), 260);
+    }
+
+    public currentDirectory(): String throws Exception {
+        return fs::currentDir();
+    }
+}

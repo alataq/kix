@@ -1,0 +1,66 @@
+// Three general workers run in addition to the main thread. The KIX_WKC
+// environment variable can override this default at run time.
+$wkc 3;
+
+import kix.io;
+
+// A plain `&` task runs on the shared general worker pool.
+public &sumTo(limit: int): int {
+    int total = 0;
+    int i = 1;
+    while (i <= limit) {
+        total = total + i;
+        i = i + 1;
+    }
+    return total;
+}
+
+// `&2` gives this task two dedicated workers, each with its own task queue.
+public &2slowSquare(value: int): int {
+    int work = value;
+    int i = 0;
+    while (i < 2000000) {
+        work = work + 1;
+        i = i + 1;
+    }
+    return value * value;
+}
+
+class Counter {
+    private value: int;
+
+    public Counter(start: int) {
+        self.value = start;
+    }
+
+    // Methods can be tasks too.
+    public &add(amount: int): int {
+        self.value = self.value + amount;
+        return self.value;
+    }
+}
+
+public main(): int {
+    io::println("Submitting tasks...");
+
+    // Task calls return immediately. The results are awaited on first use.
+    int sum = sumTo(100);
+    int square = slowSquare(9);
+    int other = slowSquare(12);
+
+    Counter counter = new Counter(40);
+    int bumped = counter.add(2);
+
+    // `&name` is a bool that reports whether the task has completed. It does
+    // not wait.
+    while (!&sum) {
+    }
+
+    // Reading a task variable waits for the task, then yields its value.
+    io::printf("sumTo(100) = %lld\n", sum);
+    io::printf("slowSquare(9) = %lld\n", square);
+    io::printf("slowSquare(12) = %lld\n", other);
+    io::printf("counter.add(2) = %lld (done=%lld)\n", bumped, &bumped);
+
+    return 0;
+}

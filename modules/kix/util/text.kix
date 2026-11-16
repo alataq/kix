@@ -1,0 +1,333 @@
+import kix.string;
+import kix.vector;
+import kix.error.exceptions;
+
+namespace text {
+    private isSpaceCode(code: char): bool {
+        int value = code;
+        return value == 32 || value == 9 || value == 10 || value == 13;
+    }
+
+    private isDigitCode(code: char): bool {
+        int value = code;
+        return value >= 48 && value <= 57;
+    }
+
+    public trim(value: String): String {
+        int start = 0;
+        int end = value.length();
+        while (start < end && isSpaceCode(value.byteAt(start))) start = start + 1;
+        while (end > start && isSpaceCode(value.byteAt(end - 1))) end = end - 1;
+        return value.substring(start, end - start);
+    }
+
+    public trimStart(value: String): String {
+        int start = 0;
+        while (start < value.length() && isSpaceCode(value.byteAt(start))) start = start + 1;
+        return value.substring(start, value.length() - start);
+    }
+
+    public trimEnd(value: String): String {
+        int end = value.length();
+        while (end > 0 && isSpaceCode(value.byteAt(end - 1))) end = end - 1;
+        return value.substring(0, end);
+    }
+
+    public startsWith(value: String, prefix: String): bool {
+        if (prefix.length() > value.length()) return false;
+        int i = 0;
+        while (i < prefix.length()) {
+            if (value.byteAt(i) != prefix.byteAt(i)) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+
+    public endsWith(value: String, suffix: String): bool {
+        if (suffix.length() > value.length()) return false;
+        int offset = value.length() - suffix.length();
+        int i = 0;
+        while (i < suffix.length()) {
+            if (value.byteAt(offset + i) != suffix.byteAt(i)) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+
+    public indexOfFrom(value: String, needle: String, start: int): int {
+        if (needle.length() == 0) return start;
+        int i = start;
+        while (i + needle.length() <= value.length()) {
+            bool matched = true;
+            int j = 0;
+            while (j < needle.length()) {
+                if (value.byteAt(i + j) != needle.byteAt(j)) {
+                    matched = false;
+                    break;
+                }
+                j = j + 1;
+            }
+            if (matched) return i;
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    public indexOf(value: String, needle: String): int {
+        return indexOfFrom(value, needle, 0);
+    }
+
+    public contains(value: String, needle: String): bool {
+        return indexOf(value, needle) >= 0;
+    }
+
+    public replace(value: String, needle: String, replacement: String): String {
+        if (needle.isEmpty()) return value;
+        String result = new String();
+        int start = 0;
+        while (true) {
+            int index = indexOfFrom(value, needle, start);
+            if (index < 0) {
+                result.append(value.substring(start, value.length() - start));
+                break;
+            }
+            result.append(value.substring(start, index - start));
+            result.append(replacement);
+            start = index + needle.length();
+        }
+        return result;
+    }
+
+    public split(value: String, separator: String): Vector<String> {
+        Vector<String> result = new Vector<String>();
+        if (separator.isEmpty()) {
+            int i = 0;
+            while (i < value.length()) {
+                result.push(value.substring(i, 1));
+                i = i + 1;
+            }
+            return result;
+        }
+        int start = 0;
+        while (true) {
+            int index = indexOfFrom(value, separator, start);
+            if (index < 0) {
+                result.push(value.substring(start, value.length() - start));
+                break;
+            }
+            result.push(value.substring(start, index - start));
+            start = index + separator.length();
+        }
+        return result;
+    }
+
+    public join(parts: Vector<String>, separator: String): String {
+        String result = new String();
+        int i = 0;
+        while (i < parts.length()) {
+            if (i > 0) result.append(separator);
+            result.append(parts.at(i));
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public repeat(value: String, count: int): String {
+        String result = new String();
+        int i = 0;
+        while (i < count) {
+            result.append(value);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public intToString(value: int): String {
+        if (value == 0) return "0";
+        String digits = "0123456789";
+        bool negative = value < 0;
+        int number = value;
+        if (negative) number = 0 - number;
+        String reversed = new String();
+        while (number > 0) {
+            reversed.appendByte(digits.byteAt(number % 10));
+            number = number / 10;
+        }
+        String result = new String();
+        if (negative) result.append("-");
+        int i = reversed.length() - 1;
+        while (i >= 0) {
+            result.appendByte(reversed.byteAt(i));
+            i = i - 1;
+        }
+        return result;
+    }
+
+    public parseInt(value: String): int throws Exception {
+        String trimmed = trim(value);
+        if (trimmed.isEmpty()) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "empty integer");
+        }
+        int i = 0;
+        bool negative = false;
+        if (trimmed.byteAt(0) == '-' || trimmed.byteAt(0) == '+') {
+            negative = trimmed.byteAt(0) == '-';
+            i = 1;
+        }
+        if (i >= trimmed.length()) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid integer");
+        }
+        int result = 0;
+        while (i < trimmed.length()) {
+            if (!isDigitCode(trimmed.byteAt(i))) {
+                throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid integer");
+            }
+            result = result * 10 + (trimmed.byteAt(i) - 48);
+            i = i + 1;
+        }
+        if (negative) return 0 - result;
+        return result;
+    }
+
+    public parseFloat(value: String): float throws Exception {
+        String trimmed = trim(value);
+        if (trimmed.isEmpty()) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "empty float");
+        }
+        int i = 0;
+        bool negative = false;
+        if (trimmed.byteAt(0) == '-' || trimmed.byteAt(0) == '+') {
+            negative = trimmed.byteAt(0) == '-';
+            i = 1;
+        }
+        float result = 0.0;
+        bool digits = false;
+        while (i < trimmed.length()) {
+            char code = trimmed.byteAt(i);
+            if (!isDigitCode(code)) break;
+            result = result * 10.0 + (code - 48);
+            digits = true;
+            i = i + 1;
+        }
+        if (i < trimmed.length() && trimmed.byteAt(i) == '.') {
+            i = i + 1;
+            float scale = 0.1;
+            while (i < trimmed.length()) {
+                char code = trimmed.byteAt(i);
+                if (!isDigitCode(code)) break;
+                result = result + (code - 48) * scale;
+                scale = scale * 0.1;
+                digits = true;
+                i = i + 1;
+            }
+        }
+        if (!digits) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "invalid float");
+        }
+        int exponent = 0;
+        bool exponentNegative = false;
+        if (i < trimmed.length() && (trimmed.byteAt(i) == 'e' || trimmed.byteAt(i) == 'E')) {
+            i = i + 1;
+            if (i < trimmed.length() && trimmed.byteAt(i) == '-') { exponentNegative = true; i = i + 1; }
+            else if (i < trimmed.length() && trimmed.byteAt(i) == '+') i = i + 1;
+            while (i < trimmed.length()) {
+                char code = trimmed.byteAt(i);
+                if (!isDigitCode(code)) break;
+                exponent = exponent * 10 + (code - 48);
+                i = i + 1;
+            }
+        }
+        int e = 0;
+        while (e < exponent) {
+            if (exponentNegative) result = result / 10.0;
+            else result = result * 10.0;
+            e = e + 1;
+        }
+        if (negative) result = 0.0 - result;
+        return result;
+    }
+
+    public parseIntOr(value: String, fallback: int): int {
+        try {
+            return parseInt(value);
+        } catch (error: Exception) {
+            return fallback;
+        }
+    }
+
+    public floatToString(value: float, precision: int): String {
+        bool negative = value < 0.0;
+        float number = value;
+        if (negative) number = 0.0 - number;
+        int whole = number as int;
+        float fraction = number - whole;
+        int scale = 1;
+        int i = 0;
+        while (i < precision) {
+            scale = scale * 10;
+            i = i + 1;
+        }
+        int fractionValue = (fraction * scale) as int;
+        String result = new String();
+        if (negative) result.append("-");
+        result.append(intToString(whole));
+        if (fractionValue != 0) {
+            result.append(".");
+            String fractionText = intToString(fractionValue);
+            int padding = precision - fractionText.length();
+            i = 0;
+            while (i < padding) {
+                result.appendByte('0');
+                i = i + 1;
+            }
+            int end = fractionText.length();
+            while (end > 0 && fractionText.byteAt(end - 1) == '0') end = end - 1;
+            result.append(fractionText.substring(0, end));
+        }
+        return result;
+    }
+
+    public padLeft(value: String, width: int, fill: char): String {
+        if (value.length() >= width) return value;
+        String result = new String();
+        int i = value.length();
+        while (i < width) {
+            result.appendByte(fill);
+            i = i + 1;
+        }
+        result.append(value);
+        return result;
+    }
+
+    public class StringBuilder {
+        private data: String;
+
+        public StringBuilder() {
+            self.data = new String();
+        }
+
+        public append(value: String): void {
+            self.data.append(value);
+        }
+
+        public appendByte(value: char): void {
+            self.data.appendByte(value);
+        }
+
+        public appendInt(value: int): void {
+            self.data.append(intToString(value));
+        }
+
+        public clear(): void {
+            self.data.clear();
+        }
+
+        public length(): int {
+            return self.data.length();
+        }
+
+        public toString(): String {
+            return new String(self.data);
+        }
+    }
+}

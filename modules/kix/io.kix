@@ -1,0 +1,55 @@
+import kix.string;
+import kix.syscalls;
+import kix.error.exceptions;
+
+namespace io {
+    public print(message: String): void {
+        syscalls::write(1, message, message.length());
+    }
+
+    public println(message: String): void {
+        syscalls::write(1, message, message.length());
+        syscalls::write(1, "\n", 1);
+    }
+
+    public printErr(message: String): void {
+        syscalls::write(2, message, message.length());
+    }
+
+    public printlnErr(message: String): void {
+        syscalls::write(2, message, message.length());
+        syscalls::write(2, "\n", 1);
+    }
+
+    // This declaration maps directly to C's printf. Kix int is 64-bit, so use
+    // the C long-long format specifier (%lld) when formatting int values.
+    public printf(format: String, ...): int;
+
+    public readLine(): String throws Exception {
+        String buffer = new String();
+        String byte = new String();
+        byte.reserve(2);
+
+        while (true) {
+            int count = syscalls::read(0, byte, 1);
+            if (count < 0) {
+                throw new Exception(ExceptionKind.Io, count, "read failed");
+            }
+            if (count == 0) {
+                break;
+            }
+
+            char ch = byte.byteAt(0);
+            if (ch == 10) {
+                break;
+            }
+            if (ch == 13) {
+                continue;
+            }
+
+            buffer.appendByte(ch);
+        }
+
+        return buffer;
+    }
+}

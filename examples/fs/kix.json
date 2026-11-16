@@ -1,0 +1,5 @@
+{
+  "name": "fs",
+  "entry": "src/main.kix",
+  "output": "bin/fs"
+}

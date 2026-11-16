@@ -1,0 +1,36 @@
+import kix.string;
+import kix.error.exceptions;
+
+namespace test {
+    public fail(message: String): void throws Exception {
+        throw new Exception(ExceptionKind.Other, -1, message);
+    }
+
+    public assert(condition: bool, message: String): void throws Exception {
+        if (!condition) fail(message);
+    }
+
+    public assertTrue(condition: bool, message: String): void throws Exception {
+        if (!condition) fail(message);
+    }
+
+    public assertFalse(condition: bool, message: String): void throws Exception {
+        if (condition) fail(message);
+    }
+
+    public assertInt(actual: int, expected: int, message: String): void throws Exception {
+        if (actual != expected) {
+            String detail = message.concat(": expected ");
+            detail.append("integer ");
+            fail(detail);
+        }
+    }
+
+    public assertString(actual: String, expected: String, message: String): void throws Exception {
+        if (!actual.equals(expected)) fail(message);
+    }
+
+    public assertBool(actual: bool, expected: bool, message: String): void throws Exception {
+        if (actual != expected) fail(message);
+    }
+}

@@ -1,0 +1,193 @@
+import kix.string;
+import kix.vector;
+import kix.util.encoding;
+
+namespace hash {
+    private mask(value: int): int {
+        return value & 4294967295;
+    }
+
+    private pow2(bits: int): int {
+        int result = 1;
+        int i = 0;
+        while (i < bits) { result = result * 2; i = i + 1; }
+        return result;
+    }
+
+    private shr(value: int, bits: int): int {
+        return mask(value) / pow2(bits);
+    }
+
+    private shl(value: int, bits: int): int {
+        int result = mask(value);
+        int i = 0;
+        while (i < bits) {
+            result = (result * 2) & 4294967295;
+            i = i + 1;
+        }
+        return result;
+    }
+
+    private rotr(value: int, bits: int): int {
+        return mask(shr(value, bits) | shl(value, 32 - bits));
+    }
+
+    private add(a: int, b: int): int {
+        return (a + b) & 4294967295;
+    }
+
+    public crc32(data: String): int {
+        int crc = 4294967295;
+        int i = 0;
+        while (i < data.length()) {
+            int byteValue = data.byteAt(i);
+            if (byteValue < 0) byteValue = byteValue + 256;
+            crc = crc ^ byteValue;
+            int bit = 0;
+            while (bit < 8) {
+                if ((crc & 1) != 0) {
+                    crc = (crc / 2) ^ 3988292384;
+                } else {
+                    crc = crc / 2;
+                }
+                crc = mask(crc);
+                bit = bit + 1;
+            }
+            i = i + 1;
+        }
+        return mask(crc ^ 4294967295);
+    }
+
+    public fnv1a(data: String): int {
+        int value = 2166136261;
+        int i = 0;
+        while (i < data.length()) {
+            int byteValue = data.byteAt(i);
+            if (byteValue < 0) byteValue = byteValue + 256;
+            value = value ^ byteValue;
+            value = (value * 16777619) & 4294967295;
+            i = i + 1;
+        }
+        return value;
+    }
+
+    private hexDigit(value: int): char {
+        if (value < 10) return (48 + value) as char;
+        return (87 + value) as char;
+    }
+
+    private appendWordHex(result: String, value: int): void {
+        int i = 7;
+        while (i >= 0) {
+            int nibble = shr(value, i * 4) & 15;
+            result.appendByte(hexDigit(nibble));
+            i = i - 1;
+        }
+    }
+
+    private shaConstants(): Vector<int> {
+        Vector<int> k = new Vector<int>();
+        k.push(1116352408); k.push(1899447441); k.push(3049323471); k.push(3921009573);
+        k.push(961987163); k.push(1508970993); k.push(2453635748); k.push(2870763221);
+        k.push(3624381080); k.push(310598401); k.push(607225278); k.push(1426881987);
+        k.push(1925078388); k.push(2162078206); k.push(2614888103); k.push(3248222580);
+        k.push(3835390401); k.push(4022224774); k.push(264347078); k.push(604807628);
+        k.push(770255983); k.push(1249150122); k.push(1555081692); k.push(1996064986);
+        k.push(2554220882); k.push(2821834349); k.push(2952996808); k.push(3210313671);
+        k.push(3336571891); k.push(3584528711); k.push(113926993); k.push(338241895);
+        k.push(666307205); k.push(773529912); k.push(1294757372); k.push(1396182291);
+        k.push(1695183700); k.push(1986661051); k.push(2177026350); k.push(2456956037);
+        k.push(2730485921); k.push(2820302411); k.push(3259730800); k.push(3345764771);
+        k.push(3516065817); k.push(3600352804); k.push(4094571909); k.push(275423344);
+        k.push(430227734); k.push(506948616); k.push(659060556); k.push(883997877);
+        k.push(958139571); k.push(1322822218); k.push(1537002063); k.push(1747873779);
+        k.push(1955562222); k.push(2024104815); k.push(2227730452); k.push(2361852424);
+        k.push(2428436474); k.push(2756734187); k.push(3204031479); k.push(3329325298);
+        return k;
+    }
+
+    public sha256Bytes(data: String): String {
+        Vector<int> message = new Vector<int>();
+        int i = 0;
+        while (i < data.length()) {
+            int byteValue = data.byteAt(i);
+            if (byteValue < 0) byteValue = byteValue + 256;
+            message.push(byteValue);
+            i = i + 1;
+        }
+        int bitLengthLow = message.length() * 8;
+        int bitLengthHigh = bitLengthLow / 4294967296;
+        bitLengthLow = bitLengthLow % 4294967296;
+        message.push(128);
+        while (message.length() % 64 != 56) message.push(0);
+        message.push((bitLengthHigh / 16777216) % 256);
+        message.push((bitLengthHigh / 65536) % 256);
+        message.push((bitLengthHigh / 256) % 256);
+        message.push(bitLengthHigh % 256);
+        message.push((bitLengthLow / 16777216) % 256);
+        message.push((bitLengthLow / 65536) % 256);
+        message.push((bitLengthLow / 256) % 256);
+        message.push(bitLengthLow % 256);
+
+        Vector<int> constants = shaConstants();
+        int h0 = 1779033703; int h1 = 3144134277; int h2 = 1013904242; int h3 = 2773480762;
+        int h4 = 1359893119; int h5 = 2600822924; int h6 = 528734635; int h7 = 1541459225;
+
+        int offset = 0;
+        while (offset < message.length()) {
+            int[64] w;
+            i = 0;
+            while (i < 16) {
+                int base = offset + i * 4;
+                w[i] = shl(message.at(base), 24) | shl(message.at(base + 1), 16) |
+                    shl(message.at(base + 2), 8) | message.at(base + 3);
+                i = i + 1;
+            }
+            i = 16;
+            while (i < 64) {
+                int s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ shr(w[i - 15], 3);
+                int s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ shr(w[i - 2], 10);
+                w[i] = add(add(add(w[i - 16], s0), w[i - 7]), s1);
+                i = i + 1;
+            }
+
+            int a = h0; int b = h1; int c = h2; int d = h3;
+            int e = h4; int f = h5; int g = h6; int h = h7;
+
+            i = 0;
+            while (i < 64) {
+                int s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+                int ch = (e & f) ^ (mask(~e) & g);
+                int temp1 = add(add(add(add(h, s1), ch), constants.at(i)), w[i]);
+                int s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+                int maj = (a & b) ^ (a & c) ^ (b & c);
+                int temp2 = add(s0, maj);
+                h = g; g = f; f = e; e = add(d, temp1);
+                d = c; c = b; b = a; a = add(temp1, temp2);
+                i = i + 1;
+            }
+
+            h0 = add(h0, a); h1 = add(h1, b); h2 = add(h2, c); h3 = add(h3, d);
+            h4 = add(h4, e); h5 = add(h5, f); h6 = add(h6, g); h7 = add(h7, h);
+            offset = offset + 64;
+        }
+
+        String result = new String();
+        appendWordBytes(result, h0); appendWordBytes(result, h1);
+        appendWordBytes(result, h2); appendWordBytes(result, h3);
+        appendWordBytes(result, h4); appendWordBytes(result, h5);
+        appendWordBytes(result, h6); appendWordBytes(result, h7);
+        return result;
+    }
+
+    private appendWordBytes(result: String, value: int): void {
+        result.appendByte((shr(value, 24) & 255) as char);
+        result.appendByte((shr(value, 16) & 255) as char);
+        result.appendByte((shr(value, 8) & 255) as char);
+        result.appendByte((value & 255) as char);
+    }
+
+    public sha256(data: String): String {
+        return encoding::hexEncode(sha256Bytes(data));
+    }
+}

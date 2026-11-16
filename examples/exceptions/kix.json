@@ -1,0 +1,5 @@
+{
+  "name": "exceptions",
+  "entry": "src/main.kix",
+  "output": "bin/exceptions"
+}

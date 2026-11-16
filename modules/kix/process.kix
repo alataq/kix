@@ -1,0 +1,34 @@
+import kix.syscalls;
+import kix.string;
+import kix.util.time;
+import kix.error.exceptions;
+
+namespace process {
+    public pid(): int {
+        return syscalls::getpid();
+    }
+
+    public parentPid(): int {
+        return syscalls::getppid();
+    }
+
+    public exit(status: int): void {
+        syscalls::exit(status);
+    }
+
+    public abort(): void {
+        syscalls::kill(syscalls::getpid(), 6);
+    }
+
+    public kill(pid: int, signal: int): int {
+        return syscalls::kill(pid, signal);
+    }
+
+    public run(command: String): int {
+        return runCommand(command);
+    }
+
+    public sleepMillis(milliseconds: int): void throws Exception {
+        time::sleepMillis(milliseconds);
+    }
+}

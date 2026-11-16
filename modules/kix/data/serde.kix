@@ -1,0 +1,111 @@
+import kix.string;
+import kix.vector;
+import kix.collections;
+
+namespace serde {
+    public enum Kind {
+        Null,
+        Bool,
+        Int,
+        Float,
+        String,
+        Array,
+        Object,
+    }
+
+    public class Value {
+        public kind: Kind;
+        public boolValue: bool;
+        public intValue: int;
+        public floatValue: float;
+        public stringValue: String;
+        public arrayValue: Vector<Value>;
+        public objectValue: StringMap<Value>;
+
+        public Value(kind: Kind) {
+            self.kind = kind;
+            self.boolValue = false;
+            self.intValue = 0;
+            self.floatValue = 0.0;
+            self.stringValue = new String();
+            self.arrayValue = new Vector<Value>();
+            self.objectValue = new StringMap<Value>();
+        }
+
+        public Value(value: bool) {
+            self.kind = Kind.Bool;
+            self.boolValue = value;
+            self.intValue = 0;
+            self.floatValue = 0.0;
+            self.stringValue = new String();
+            self.arrayValue = new Vector<Value>();
+            self.objectValue = new StringMap<Value>();
+        }
+
+        public Value(value: int) {
+            self.kind = Kind.Int;
+            self.boolValue = false;
+            self.intValue = value;
+            self.floatValue = 0.0;
+            self.stringValue = new String();
+            self.arrayValue = new Vector<Value>();
+            self.objectValue = new StringMap<Value>();
+        }
+
+        public Value(value: float) {
+            self.kind = Kind.Float;
+            self.boolValue = false;
+            self.intValue = 0;
+            self.floatValue = value;
+            self.stringValue = new String();
+            self.arrayValue = new Vector<Value>();
+            self.objectValue = new StringMap<Value>();
+        }
+
+        public Value(value: String) {
+            self.kind = Kind.String;
+            self.boolValue = false;
+            self.intValue = 0;
+            self.floatValue = 0.0;
+            self.stringValue = value;
+            self.arrayValue = new Vector<Value>();
+            self.objectValue = new StringMap<Value>();
+        }
+
+        public Value(value: Vector<Value>) {
+            self.kind = Kind.Array;
+            self.boolValue = false;
+            self.intValue = 0;
+            self.floatValue = 0.0;
+            self.stringValue = new String();
+            self.arrayValue = value;
+            self.objectValue = new StringMap<Value>();
+        }
+
+        public Value(value: StringMap<Value>) {
+            self.kind = Kind.Object;
+            self.boolValue = false;
+            self.intValue = 0;
+            self.floatValue = 0.0;
+            self.stringValue = new String();
+            self.arrayValue = new Vector<Value>();
+            self.objectValue = value;
+        }
+
+        public isNull(): bool { return self.kind == Kind.Null; }
+        public isBool(): bool { return self.kind == Kind.Bool; }
+        public isInt(): bool { return self.kind == Kind.Int; }
+        public isFloat(): bool { return self.kind == Kind.Float; }
+        public isString(): bool { return self.kind == Kind.String; }
+        public isArray(): bool { return self.kind == Kind.Array; }
+        public isObject(): bool { return self.kind == Kind.Object; }
+    }
+
+    public nullValue(): Value { return new Value(Kind.Null); }
+    public boolValue(value: bool): Value { return new Value(value); }
+    public intValue(value: int): Value { return new Value(value); }
+    public floatValue(value: float): Value { return new Value(value); }
+    public stringValue(value: String): Value { return new Value(value); }
+    public arrayValue(value: Vector<Value>): Value { return new Value(value); }
+    public objectValue(value: StringMap<Value>): Value { return new Value(value); }
+}

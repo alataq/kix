@@ -1,0 +1,94 @@
+import kix.string;
+import kix.vector;
+import kix.error.exceptions;
+
+namespace csv {
+    public parse(text: String): Vector<Vector<String>> throws Exception {
+        Vector<Vector<String>> rows = new Vector<Vector<String>>();
+        Vector<String> row = new Vector<String>();
+        String field = new String();
+        bool quoted = false;
+        int i = 0;
+        while (i < text.length()) {
+            char value = text.byteAt(i);
+            if (quoted) {
+                if (value == '"') {
+                    if (i + 1 < text.length() && text.byteAt(i + 1) == '"') {
+                        field.appendByte('"');
+                        i = i + 1;
+                    } else {
+                        quoted = false;
+                    }
+                } else {
+                    field.appendByte(value);
+                }
+            } else {
+                if (value == '"') {
+                    quoted = true;
+                } else if (value == ',') {
+                    row.push(field);
+                    field = new String();
+                } else if (value == '\n') {
+                    row.push(field);
+                    rows.push(row);
+                    row = new Vector<String>();
+                    field = new String();
+                } else if (value != '\r') {
+                    field.appendByte(value);
+                }
+            }
+            i = i + 1;
+        }
+        if (quoted) {
+            throw new Exception(ExceptionKind.InvalidArgument, -22, "unterminated quoted field");
+        }
+        if (!field.isEmpty() || row.length() > 0) {
+            row.push(field);
+            rows.push(row);
+        }
+        return rows;
+    }
+
+    private writeField(result: String, field: String): void {
+        bool quote = false;
+        int i = 0;
+        while (i < field.length()) {
+            char value = field.byteAt(i);
+            if (value == ',' || value == '"' || value == '\n' || value == '\r') {
+                quote = true;
+                break;
+            }
+            i = i + 1;
+        }
+        if (!quote) {
+            result.append(field);
+            return;
+        }
+        result.appendByte('"');
+        i = 0;
+        while (i < field.length()) {
+            char value = field.byteAt(i);
+            if (value == '"') result.appendByte('"');
+            result.appendByte(value);
+            i = i + 1;
+        }
+        result.appendByte('"');
+    }
+
+    public stringify(rows: Vector<Vector<String>>): String {
+        String result = new String();
+        int i = 0;
+        while (i < rows.length()) {
+            Vector<String> row = rows.at(i);
+            int j = 0;
+            while (j < row.length()) {
+                if (j > 0) result.appendByte(',');
+                writeField(result, row.at(j));
+                j = j + 1;
+            }
+            result.appendByte('\n');
+            i = i + 1;
+        }
+        return result;
+    }
+}
